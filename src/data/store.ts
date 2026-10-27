@@ -1,15 +1,15 @@
 /// The narrow database surface the repositories need. The Supabase version
 /// lives in `supabaseStore.ts`; tests use an in-memory fake that copies the
 /// server triggers.
-export type Table = 'tasks' | 'item_notes';
+export type Table = 'planner_projects' | 'planner_tasks' | 'planner_links' | 'planner_activity';
 
 export type Row = Record<string, unknown> & { id: string; revision: number };
 
 export type InsertResult = { kind: 'inserted'; row: Row } | { kind: 'duplicate' };
 
 export interface ListQuery {
-  /// Only rows whose `parent_id` matches (notes).
-  parentId?: string;
+  /// Only rows whose columns equal these values (for example a task's links).
+  eq?: Record<string, string>;
   includeDeleted?: boolean;
   from: number;
   to: number;

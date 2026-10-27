@@ -1,52 +1,55 @@
-import { urgencyLabels, type TaskRow } from '../domain/task';
+import { decodeLabels, priorityLabels, statusLabels, type Project, type Status } from '../domain/planner';
 import { Modal } from './Modal';
 
 const labels: Record<string, string> = {
   title: 'Title',
-  due_date_ad: 'Date',
-  due_time: 'Time',
-  undated: 'No date',
-  urgency: 'Urgency',
-  category: 'Category',
-  notes: 'Notes',
-  alert_offsets: 'Alerts',
-  steps: 'Steps',
+  description: 'Description',
+  status: 'Status',
+  priority: 'Priority',
+  project_id: 'Project',
+  labels: 'Labels',
+  start_date: 'Start',
+  due_date: 'Due',
+  estimate_minutes: 'Estimate (min)',
+  critical: 'Critical',
   completed_at_ms: 'Completed',
   deleted_at_ms: 'Deleted',
-  body: 'Note',
 };
 
-function show(field: string, value: unknown): string {
+function show(field: string, value: unknown, projects: Project[]): string {
   if (value === null || value === undefined || value === '') return '—';
-  if (field === 'urgency') return urgencyLabels[Number(value)] ?? String(value);
-  if (field === 'steps' && Array.isArray(value)) {
-    return value.map((s: { title: string; done: boolean }) => `${s.done ? '☑' : '☐'} ${s.title}`).join('\n') || '—';
-  }
+  if (field === 'status') return statusLabels[value as Status] ?? String(value);
+  if (field === 'priority') return priorityLabels[Number(value)] ?? String(value);
+  if (field === 'project_id') return projects.find((p) => p.id === value)?.name ?? 'Inbox';
+  if (field === 'labels') return decodeLabels(String(value)).join(', ') || '—';
   if (field === 'completed_at_ms' || field === 'deleted_at_ms') return new Date(Number(value)).toLocaleString();
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   return String(value);
 }
 
-/// Shown when a task or note changed on another device while it was open
-/// here. Nothing has been written yet; the person chooses.
+/// Shown when a task changed on another device while it was open here.
+/// Nothing has been written yet; the person chooses.
 export function ConflictDialog({
   current,
   mine,
+  projects,
   onApplyMine,
   onKeepTheirs,
 }: {
-  current: Record<string, unknown> & Partial<TaskRow>;
+  current: object;
   mine: Record<string, unknown>;
+  projects: Project[];
   onApplyMine: () => void;
   onKeepTheirs: () => void;
 }) {
-  const fields = Object.keys(mine);
+  const saved = current as Record<string, unknown>;
+  const fields = Object.keys(mine).filter((f) => f !== 'completed_at_ms' || !('status' in mine));
   return (
     <Modal title="This changed on another device" onClose={onKeepTheirs} wide>
       <div className="stack">
         <p>
-          While you were editing, this was saved somewhere else (usually your phone). Your changes are not saved yet.
-          Compare and choose what to keep.
+          While you were editing, this task was saved somewhere else (usually your phone). Your changes are not saved
+          yet. Compare and choose what to keep.
         </p>
         <table className="compare">
           <thead>
@@ -60,8 +63,8 @@ export function ConflictDialog({
             {fields.map((field) => (
               <tr key={field}>
                 <th scope="row">{labels[field] ?? field}</th>
-                <td>{show(field, current[field])}</td>
-                <td>{show(field, mine[field])}</td>
+                <td>{show(field, saved[field], projects)}</td>
+                <td>{show(field, mine[field], projects)}</td>
               </tr>
             ))}
           </tbody>

@@ -1,9 +1,14 @@
 import type { InsertResult, ListQuery, Row, Store, Table } from '../src/data/store';
 
-/// In-memory copy of the server rules: owner-only access, a global revision
-/// sequence, stale writes ignored, tombstones final, duplicate ids refused.
+/// In-memory copy of the server rules (migration 0005): owner-only access, a
+/// global revision sequence, stale writes ignored, duplicate ids refused.
 export class FakeStore implements Store {
-  readonly tables: Record<Table, Map<string, Row>> = { tasks: new Map(), item_notes: new Map() };
+  readonly tables: Record<Table, Map<string, Row>> = {
+    planner_projects: new Map(),
+    planner_tasks: new Map(),
+    planner_links: new Map(),
+    planner_activity: new Map(),
+  };
   private sequence = 100;
   writes = 0;
 
@@ -40,7 +45,6 @@ export class FakeStore implements Store {
     if (!old || old.revision !== revision) return null;
     if ('owner_id' in values && values.owner_id !== old.owner_id) throw new Error('owner_id cannot change');
     if (Number(values.updated_at_ms) < Number(old.updated_at_ms)) return null;
-    if (table === 'tasks' && old.deleted_at_ms != null && values.deleted_at_ms == null) return null;
     const next = { ...old, ...values, revision: ++this.sequence, server_updated_at: 'now' } as Row;
     this.tables[table].set(id, next);
     return structuredClone(next);
@@ -61,7 +65,7 @@ export class FakeStore implements Store {
     return [...this.tables[table].values()]
       .filter((r) => r.owner_id === this.userId)
       .filter((r) => query.includeDeleted || r.deleted_at_ms == null)
-      .filter((r) => query.parentId === undefined || r.parent_id === query.parentId)
+      .filter((r) => Object.entries(query.eq ?? {}).every(([k, v]) => r[k] === v))
       .sort((a, b) => a.id.localeCompare(b.id))
       .slice(query.from, query.to + 1)
       .map((r) => structuredClone(r));

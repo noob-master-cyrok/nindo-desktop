@@ -1,4 +1,5 @@
-import { serverOwned } from '../domain/task';
+/// Columns the server owns. They are never sent in a write.
+export const serverOwned = ['owner_id', 'revision', 'server_updated_at'] as const;
 
 /// Edit time for a write. Never behind the row's current edit time, so the
 /// server trigger accepts it even when this computer's clock is slow.
@@ -23,7 +24,7 @@ export function buildPatch(
 
 /// Fields of [edited] that differ from [base], compared by value so an
 /// untouched steps array is not counted as a change.
-export function diffFields<T extends Record<string, unknown>>(base: T, edited: Partial<T>): Partial<T> {
+export function diffFields<T extends object>(base: T, edited: Partial<T>): Partial<T> {
   const out: Partial<T> = {};
   for (const key of Object.keys(edited) as (keyof T)[]) {
     if (JSON.stringify(edited[key]) !== JSON.stringify(base[key])) out[key] = edited[key];

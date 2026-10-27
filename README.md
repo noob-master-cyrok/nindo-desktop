@@ -1,8 +1,8 @@
 # Nindo Desktop
 
-A small web app for working on your Nindo tasks from a computer. Sign in with the same email as the phone app, then view, add, edit, complete and delete your own tasks and their notes. The phone picks up changes through its normal sync. The plan it follows is `docs/desktop-companion-plan.md`.
+A small web app for your Nindo **Tasks** (the phone's Tasks tab, the planner) on a computer. Sign in with the same email as the phone app. You can see, add and edit tasks with all their details: status, priority, project, labels, start and due dates, estimate, critical, description, sub-tasks, links and comments. The phone picks up changes through its normal sync.
 
-The Flutter app and the database schema are unchanged. This folder is separate from the Flutter app.
+The Tasks tab syncs from the app release after 1.5.56 (database schema 17), using the server tables in `supabase/migrations/0005_planner_sync.sql`. Calendar items (events, reminders, birthdays) are not shown here. The first plan for this app is `docs/desktop-companion-plan.md`.
 
 ## Setup
 
@@ -37,12 +37,14 @@ GitHub Pages cannot set response headers, so the Content-Security-Policy is a `<
 
 ## What it does
 
-- **Sign in:** emailed one-time code, the same as the phone, or the sign-in link in that email (the site URL must be in Supabase Auth → Redirect URLs). The desktop never creates accounts (`shouldCreateUser: false`). "Send code" waits 60 seconds between requests. The signed-in email is always shown at the top.
-- **Tasks:** All open / Today / Upcoming / Overdue / No date / Completed, title search, sort by due date or urgency, and "last changed" from `server_updated_at`. The list refreshes when the window gets focus and with the Refresh button.
-- **Edit:** title, AD date, time, no date, urgency, category, alert minutes, steps (add, rename, reorder, tick, remove; ids kept) and notes. Repeat rules are shown but can't be edited here.
-- **Complete / reopen** one-off tasks. **Delete** is a soft delete, needs confirmation, and is final.
-- **Notes** (`item_notes`) on each task: add, edit, delete.
-- **CSV export** with spreadsheet formula protection. **CSV import** checks every row first (dry run), shows the problems for each line, and adds only valid rows as new tasks.
+- **Sign in:** with the code from the email, or the email's sign-in link. The site URL must be in Supabase Auth → Redirect URLs. The desktop never creates accounts (`shouldCreateUser: false`). "Send code" waits 60 seconds between requests. The signed-in email is always shown at the top.
+- **Lists:** All tasks, Today (due today or running between start and due), Overdue, Inbox, and one list per project, with open counts. Tasks are grouped by status (In progress, To do, Backlog; Done and Cancelled under "Show done"), critical first, then the phone's manual order. You can also sort by priority or due date, and search titles, labels and descriptions.
+- **Status circle:** works like the phone: to do → in progress → done → to do.
+- **Task details:** every field the phone has, plus sub-tasks (add, tick, delete), links (add, remove) and the activity log with comments. Changes are recorded in the history the same way the phone records them.
+- **New project**, with the phone's colours.
+- **Delete** is a soft delete of the task and its sub-tasks, and it reaches the phone.
+- **CSV export** of top-level tasks with their sub-tasks, with spreadsheet formula protection.
+- The list refreshes when the window gets focus and with Refresh.
 
 ## How saving works ("last write wins")
 
@@ -50,26 +52,23 @@ Every save:
 
 1. Reads the task fresh from the server.
 2. If its `revision` is not the one you opened, the task changed on another device. Nothing is written. A dialog shows the saved version next to your changes. **Use my changes** puts only your edited fields on top of the saved version. **Discard my changes** keeps the other device's version.
-3. Otherwise it copies the fresh row, changes only the fields you edited and keeps everything else exactly as it was (sound, tithi data, alert offsets, exceptions, step ids, and any column added later).
+3. Otherwise it copies the fresh row, changes only the fields you edited and keeps everything else exactly as it was (sort order, dates, labels, and any column added later).
 4. Sets `updated_at_ms = max(now, previous + 1)`, so a slow computer clock can't make the server ignore the write.
 5. Writes with `… where id = ? and revision = ?`. If 0 rows change, the conflict dialog from step 2 appears.
 
-`owner_id`, `revision` and `server_updated_at` are never sent. New tasks get a client uuid; if a retry hits "duplicate key", the existing row is read back.
+`owner_id`, `revision` and `server_updated_at` are never sent. New tasks get a client uuid; if a retry hits "duplicate key", the existing row is read back. A status change keeps `completed_at_ms` in step, as on the phone.
 
 ## Known limits
 
+- **Your tasks appear only once the phone runs the release after 1.5.56.** The first time it opens, it uploads every task, project, link and history line.
 - **Whole-task conflicts.** The desktop never overwrites a phone edit it hasn't seen. The phone, though, keeps whichever edit is later by `updated_at_ms`. If you edit a task offline on the phone after editing it on the desktop, the phone's version replaces the desktop's when it syncs.
-- **Not instant.** The phone pulls when the app opens or resumes, shortly after a local change, after sign-in, or on "Sync now". There's no background poll.
+- **Not instant.** The phone pulls when the app opens or resumes, shortly after a local change, after sign-in, or on "Sync now".
 - **Each device uses its own clock** for `updated_at_ms`.
-- **Repeating tasks can't be completed here.** On the phone, completing one moves it to its next date, and the desktop doesn't calculate recurrences yet. Completing a whole series here would end it.
-- **No XP for desktop completions.** XP is phone-only.
-- **Phone-only data** (timers, Planner status and groups, breaks, alarms, custom sounds) is not visible here and is never touched.
-- **Imported Google Calendar events** are shown read-only.
-- **Dates are AD only for now.** BS display and a BS date picker are Phase 2. Tasks set in BS on the phone keep their BS meaning; the editor says so.
+- **Phone-only:** files and photos, timers and focus or time sessions, breaks, attendance and daily-planning settings are not shown here. A task finished on the desktop doesn't stop a timer running for it on the phone until you open that task there.
+- **Board drag and reordering** are phone-only for now. New desktop tasks go to the end of their status.
 
 ## Tests
 
-- `tests/` unit tests use `tests/fakeStore.ts`, an in-memory copy of the server rules (owner-only rows, revision on every write, stale writes ignored, tombstones final).
-- `e2e/smoke.spec.ts` runs the built app with its CSP against `e2e/mockSupabase.ts`. It covers sign in, create, edit, a phone edit causing a conflict, notes, complete, the repeating-task guard and delete.
-- `supabase/tests/rls_test.sql` (run with `supabase test db`) covers cross-user isolation, the revision guard and final tombstones on a real Postgres.
-- The phone interop checks in section 8.4 of the plan need a real device and account.
+- `tests/` unit tests use `tests/fakeStore.ts`, an in-memory copy of the server rules (owner-only rows, revision on every write, stale writes ignored).
+- `e2e/smoke.spec.ts` runs the built app with its CSP against `e2e/mockSupabase.ts`. It covers code and link sign-in, the grouped list, all details, an edit, sub-tasks, links, comments, a phone edit causing a conflict, the status circle, creating in a project, and delete.
+- The phone side is covered by `test/planner_sync_test.dart` in the Flutter app.

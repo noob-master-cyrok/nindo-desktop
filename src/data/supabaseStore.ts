@@ -48,7 +48,7 @@ export class SupabaseStore implements Store {
   async list(table: Table, query: ListQuery): Promise<Row[]> {
     let request = this.client.from(table).select('*');
     if (!query.includeDeleted) request = request.is('deleted_at_ms', null);
-    if (query.parentId !== undefined) request = request.eq('parent_type', 'task').eq('parent_id', query.parentId);
+    for (const [column, value] of Object.entries(query.eq ?? {})) request = request.eq(column, value);
     const { data, error } = await request.order('id').range(query.from, query.to);
     if (error) throw friendly(error);
     return (data ?? []) as Row[];

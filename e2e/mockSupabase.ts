@@ -3,13 +3,16 @@ import type { Page, Route } from '@playwright/test';
 /// A tiny stand-in for Supabase Auth and PostgREST, so the smoke test runs
 /// the real built app without touching the live project. It copies the
 /// server rules the app depends on: owner-only rows, a revision bumped on
-/// every write, stale writes ignored, and duplicate ids refused.
+/// every write, stale writes ignored, and duplicate ids refused (migration
+/// 0005).
 export class MockSupabase {
   readonly userId = '11111111-1111-4111-8111-111111111111';
   readonly email = 'tester@example.test';
   readonly tables: Record<string, Map<string, Record<string, unknown>>> = {
-    tasks: new Map(),
-    item_notes: new Map(),
+    planner_projects: new Map(),
+    planner_tasks: new Map(),
+    planner_links: new Map(),
+    planner_activity: new Map(),
   };
   private revision = 1000;
 
@@ -119,7 +122,6 @@ export class MockSupabase {
       const changed: Record<string, unknown>[] = [];
       for (const row of [...table.values()].filter((r) => this.matches(r, filters))) {
         if (Number(values.updated_at_ms) < Number(row.updated_at_ms)) continue;
-        if (row.deleted_at_ms != null && values.deleted_at_ms == null) continue;
         const next = this.stamp({ ...row, ...values });
         table.set(next.id as string, next);
         changed.push(next);

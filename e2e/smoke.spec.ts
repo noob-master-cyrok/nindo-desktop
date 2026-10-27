@@ -2,7 +2,8 @@ import { expect, test } from '@playwright/test';
 import { MockSupabase } from './mockSupabase';
 
 const ORIGIN = 'https://wvqutuvvbnrnjmjokynf.supabase.co';
-const TASK_ID = '0b6c3d8e-1f2a-4b5c-8d9e-0f1a2b3c4d5e';
+const TASK_ID = 'a1b2c3d4-0000-4000-8000-000000000001';
+const PROJECT_ID = 'a1b2c3d4-0000-4000-8000-0000000000aa';
 
 function today() {
   const d = new Date();
@@ -12,33 +13,18 @@ function today() {
 function phoneTask(fields: Record<string, unknown> = {}) {
   return {
     id: TASK_ID,
-    title: 'Pay electricity bill',
-    due_date_ad: today(),
-    date_system: 'AD',
-    time_zone_policy: 'floating_local',
-    kind: 'task',
-    notes: null,
-    due_time: '10:00',
-    urgency: 2,
-    category: 'Home',
-    undated: false,
-    repeat_rule: 'none',
-    repeat_interval: 1,
-    repeat_weekdays: '',
-    anchor_month: null,
-    anchor_day: null,
-    missing_date_policy: 'last',
-    series_start: null,
-    repeat_until: null,
-    repeat_count: null,
-    repeat_exceptions: '',
-    alert_offsets: '10',
-    tithi_key: null,
-    tithi_region: null,
-    tithi_source: null,
-    ringtone: 'temple_bell',
-    alert_style: 'alarm',
-    steps: [{ id: 'step-1', title: 'Find the bill', done: false }],
+    project_id: PROJECT_ID,
+    parent_id: null,
+    title: 'Prepare client deck',
+    description: 'Slides for Friday',
+    status: 'doing',
+    priority: 3,
+    labels: 'client,slides',
+    start_date: null,
+    due_date: today(),
+    sort_order: 1,
+    estimate_minutes: 90,
+    critical: true,
     created_at_ms: 1_000,
     updated_at_ms: 1_000,
     completed_at_ms: null,
@@ -47,10 +33,29 @@ function phoneTask(fields: Record<string, unknown> = {}) {
   };
 }
 
-test('sign in, create, edit, complete, note, conflict and delete', async ({ page }) => {
+function seed(server: MockSupabase) {
+  server.seed('planner_projects', {
+    id: PROJECT_ID, name: 'Work', color: 3, sort_order: 0, archived: false,
+    created_at_ms: 1, updated_at_ms: 1, deleted_at_ms: null,
+  });
+  server.seed('planner_tasks', phoneTask());
+  server.seed('planner_tasks', phoneTask({
+    id: 'a1b2c3d4-0000-4000-8000-000000000002', project_id: null, title: 'Renew passport',
+    status: 'backlog', priority: 0, labels: '', due_date: null, critical: false, estimate_minutes: null,
+  }));
+  server.seed('planner_tasks', phoneTask({
+    id: 'a1b2c3d4-0000-4000-8000-000000000003', parent_id: TASK_ID, title: 'Collect numbers',
+    status: 'todo', critical: false,
+  }));
+  server.seed('planner_activity', {
+    id: 'act-1', task_id: TASK_ID, kind: 'comment', body: 'Ask Maya for the charts',
+    created_at_ms: 2_000, updated_at_ms: 2_000, deleted_at_ms: null,
+  });
+}
+
+test('sign in and work through the Tasks screen', async ({ page }) => {
   const server = new MockSupabase(ORIGIN);
-  server.seed('tasks', phoneTask());
-  server.seed('tasks', phoneTask({ id: '2b6c3d8e-1f2a-4b5c-8d9e-0f1a2b3c4d5e', title: 'Water plants', repeat_rule: 'daily', urgency: 1 }));
+  seed(server);
   await server.install(page);
   const cspErrors: string[] = [];
   page.on('console', (m) => {
@@ -69,77 +74,92 @@ test('sign in, create, edit, complete, note, conflict and delete', async ({ page
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByLabel('Signed in account')).toContainText(server.email);
 
-  // Today's list shows phone tasks.
-  await expect(page.getByRole('button', { name: /Pay electricity bill/ })).toBeVisible();
+  // Grouped by status; sub-tasks stay inside their task.
+  await expect(page.getByRole('region', { name: 'In progress' })).toContainText('Prepare client deck');
+  await expect(page.getByRole('region', { name: 'Backlog' })).toContainText('Renew passport');
+  await expect(page.getByRole('region', { name: 'In progress' })).toContainText('0/1 sub-tasks');
+  await expect(page.getByText('Collect numbers')).toHaveCount(0);
   await page.screenshot({ path: 'test-results/list.png', fullPage: true });
 
-  // Create.
-  await page.getByRole('button', { name: 'New task' }).click();
-  await page.getByLabel('Title', { exact: true }).fill('Renew passport');
-  await page.getByRole('button', { name: 'Add task' }).click();
-  await expect(page.getByRole('status')).toContainText(/Task added|Saved/);
-  await expect(page.getByRole('button', { name: /Renew passport/ })).toBeVisible();
-  const created = [...server.tables.tasks!.values()].find((r) => r.title === 'Renew passport')!;
-  expect(created).toMatchObject({ owner_id: server.userId, time_zone_policy: 'floating_local', kind: 'task' });
+  // All the details.
+  await page.getByRole('button', { name: /Prepare client deck/ }).last().click();
+  await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Prepare client deck');
+  await expect(page.getByRole('combobox', { name: 'Project' })).toHaveValue(PROJECT_ID);
+  await expect(page.getByLabel('Labels (comma separated)')).toHaveValue('client, slides');
+  await expect(page.getByLabel('Estimate (minutes)')).toHaveValue('90');
+  await expect(page.getByRole('region', { name: 'Sub-tasks' })).toContainText('Collect numbers');
+  await expect(page.getByRole('region', { name: 'Activity' })).toContainText('Ask Maya for the charts');
 
-  // Edit keeps fields the desktop does not show.
-  await page.getByRole('button', { name: /Pay electricity bill/ }).click();
-  await page.getByLabel('Title', { exact: true }).fill('Pay electricity bill today');
-  await page.getByLabel('New step').fill('Pay online');
-  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  // Edit.
+  await page.getByLabel('Description').fill('Slides for Friday, 10 pages');
+  await page.getByRole('combobox', { name: 'Priority' }).selectOption({ label: 'Urgent' });
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('status')).toContainText('Saved.');
-  const edited = server.tables.tasks!.get(TASK_ID)!;
-  expect(edited).toMatchObject({ title: 'Pay electricity bill today', ringtone: 'temple_bell', alert_style: 'alarm' });
-  expect((edited.steps as { id: string }[]).map((s) => s.id)[0]).toBe('step-1');
+  expect(server.tables.planner_tasks!.get(TASK_ID)).toMatchObject({
+    description: 'Slides for Friday, 10 pages', priority: 4, labels: 'client,slides', critical: true,
+  });
+  await expect(page.getByRole('region', { name: 'Activity' })).toContainText('Priority: Urgent');
+
+  // Sub-task, link, comment.
+  await page.getByLabel('Done: Collect numbers').click();
+  await expect(page.getByLabel('Done: Collect numbers')).toBeChecked();
+  await expect(page.getByRole('region', { name: 'In progress' })).toContainText('1/1 sub-tasks');
+  await page.getByLabel('New sub-task').fill('Rehearse');
+  await page.getByRole('region', { name: 'Sub-tasks' }).getByRole('button', { name: 'Add' }).click();
+  await expect(page.getByRole('region', { name: 'Sub-tasks' })).toContainText('Rehearse');
+  await page.getByLabel('Link address').fill('https://example.test/deck');
+  await page.getByLabel('Link title').fill('Deck draft');
+  await page.getByRole('button', { name: 'Add link' }).click();
+  await expect(page.getByRole('link', { name: 'Deck draft' })).toBeVisible();
+  await page.getByLabel('New comment').fill('Sent to Maya');
+  await page.getByRole('button', { name: 'Comment' }).click();
+  await expect(page.getByRole('region', { name: 'Activity' })).toContainText('Sent to Maya');
   await page.screenshot({ path: 'test-results/editor.png', fullPage: true });
 
   // Conflict: the phone saves while the desktop has unsaved changes.
-  server.phoneWrite('tasks', TASK_ID, { title: 'Phone title', updated_at_ms: Date.now() - 5_000 });
-  await page.getByLabel('Category').fill('Bills');
+  server.phoneWrite('planner_tasks', TASK_ID, { title: 'Prepare client deck v2', updated_at_ms: Date.now() + 1 });
+  await page.getByLabel('Estimate (minutes)').fill('120');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('dialog', { name: 'This changed on another device' })).toBeVisible();
   await page.screenshot({ path: 'test-results/conflict.png' });
-  expect(server.tables.tasks!.get(TASK_ID)!.category).toBe('Home');
+  expect(server.tables.planner_tasks!.get(TASK_ID)!.estimate_minutes).toBe(90);
   await page.getByRole('button', { name: 'Use my changes' }).click();
   await expect(page.getByRole('status')).toContainText('Saved.');
-  expect(server.tables.tasks!.get(TASK_ID)).toMatchObject({ title: 'Phone title', category: 'Bills' });
+  expect(server.tables.planner_tasks!.get(TASK_ID)).toMatchObject({ title: 'Prepare client deck v2', estimate_minutes: 120 });
 
-  // Notes.
-  await page.getByLabel('New note').fill('Account no. 1234');
-  await page.getByRole('button', { name: 'Add note' }).click();
-  await expect(page.locator('.note-body')).toHaveText('Account no. 1234');
-  expect([...server.tables.item_notes!.values()][0]).toMatchObject({ parent_type: 'task', parent_id: TASK_ID });
+  // Status circle: in progress → done.
+  await page.getByRole('button', { name: /In progress: Prepare client deck v2/ }).click();
+  await expect(page.getByRole('region', { name: 'In progress' })).toHaveCount(0);
+  expect(server.tables.planner_tasks!.get(TASK_ID)!.completed_at_ms).not.toBeNull();
 
-  // Complete.
-  await page.getByRole('button', { name: 'Complete', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Marked complete.');
-  expect(server.tables.tasks!.get(TASK_ID)!.completed_at_ms).not.toBeNull();
-
-  // Repeating tasks cannot be completed here.
-  await page.getByRole('button', { name: /Water plants/ }).click();
-  await expect(page.getByRole('button', { name: 'Complete', exact: true })).toBeDisabled();
+  // Create in a project.
+  await page.getByRole('button', { name: /^Work/ }).click();
+  await page.getByRole('button', { name: 'New task' }).click();
+  await page.getByLabel('Title', { exact: true }).fill('Book venue');
+  await page.getByRole('button', { name: 'Add task' }).click();
+  await expect(page.getByRole('status')).toContainText('Task added.');
+  const created = [...server.tables.planner_tasks!.values()].find((r) => r.title === 'Book venue')!;
+  expect(created).toMatchObject({ project_id: PROJECT_ID, status: 'todo', owner_id: server.userId });
 
   // Delete (soft).
-  await page.getByRole('button', { name: /Renew passport/ }).click();
-  await page.getByRole('button', { name: 'Delete', exact: true }).first().click();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click();
-  await expect(page.getByRole('button', { name: /Renew passport/ })).toHaveCount(0);
-  expect(created.id && server.tables.tasks!.get(created.id as string)!.deleted_at_ms).not.toBeNull();
+  await expect(page.getByRole('button', { name: /Book venue/ })).toHaveCount(0);
+  expect(server.tables.planner_tasks!.get(created.id as string)!.deleted_at_ms).not.toBeNull();
 
   expect(cspErrors).toEqual([]);
 });
 
 test('an emailed sign-in link signs in and is cleared from the address bar', async ({ page }) => {
   const server = new MockSupabase(ORIGIN);
-  server.seed('tasks', phoneTask());
+  seed(server);
   await server.install(page);
   const s = server.session();
   await page.goto(
     `/#access_token=${s.access_token}&refresh_token=${s.refresh_token}&expires_in=3600&expires_at=${s.expires_at}&token_type=bearer&type=magiclink`,
   );
   await expect(page.getByLabel('Signed in account')).toContainText(server.email);
-  await expect(page.getByRole('button', { name: /Pay electricity bill/ })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'In progress' })).toContainText('Prepare client deck');
   expect(page.url()).not.toContain('access_token');
 });
 
