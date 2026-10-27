@@ -31,13 +31,13 @@ To publish a change made in the Nindo repo:
 git subtree push --prefix=desktop desktop-site main
 ```
 
-(`desktop-site` is the git remote for the `nindo-desktop` repository.) Sign-in uses an emailed code rather than a link, so no redirect URL needs to be added in Supabase Auth.
+(`desktop-site` is the git remote for the `nindo-desktop` repository.) For sign-in links to work, add the site URL to Supabase Auth → URL Configuration → Redirect URLs. The code alone needs no setting, as long as the email template includes `{{ .Token }}`.
 
 GitHub Pages cannot set response headers, so the Content-Security-Policy is a `<meta>` tag in the built `index.html`. It allows scripts and styles from the site only, and connections to the Supabase project only.
 
 ## What it does
 
-- **Sign in:** emailed one-time code, the same as the phone. The desktop never creates accounts (`shouldCreateUser: false`). "Send code" waits 60 seconds between requests. The signed-in email is always shown at the top.
+- **Sign in:** emailed one-time code, the same as the phone, or the sign-in link in that email (the site URL must be in Supabase Auth → Redirect URLs). The desktop never creates accounts (`shouldCreateUser: false`). "Send code" waits 60 seconds between requests. The signed-in email is always shown at the top.
 - **Tasks:** All open / Today / Upcoming / Overdue / No date / Completed, title search, sort by due date or urgency, and "last changed" from `server_updated_at`. The list refreshes when the window gets focus and with the Refresh button.
 - **Edit:** title, AD date, time, no date, urgency, category, alert minutes, steps (add, rename, reorder, tick, remove; ids kept) and notes. Repeat rules are shown but can't be edited here.
 - **Complete / reopen** one-off tasks. **Delete** is a soft delete, needs confirmation, and is final.

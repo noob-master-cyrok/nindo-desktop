@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { linkError, signInReturnUrl } from '../supabase';
 
 const COOLDOWN_SECONDS = 60;
 
@@ -10,7 +11,9 @@ export function SignIn({ client }: { client: SupabaseClient }) {
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() =>
+    linkError() ? 'That sign-in link has expired or was already used. Send a new code.' : null,
+  );
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -27,7 +30,7 @@ export function SignIn({ client }: { client: SupabaseClient }) {
     // Existing accounts only: the desktop never creates a new one.
     const { error: sendError } = await client.auth.signInWithOtp({
       email: address,
-      options: { shouldCreateUser: false },
+      options: { shouldCreateUser: false, emailRedirectTo: signInReturnUrl() },
     });
     setBusy(false);
     setCooldown(COOLDOWN_SECONDS);
@@ -79,7 +82,8 @@ export function SignIn({ client }: { client: SupabaseClient }) {
         ) : (
           <form onSubmit={verify} className="stack">
             <p>
-              We sent a code to <strong>{sentTo}</strong>.
+              We sent an email to <strong>{sentTo}</strong>. Enter the code from it, or open its sign-in link in this
+              browser.
             </p>
             <label className="field">
               <span>Code</span>

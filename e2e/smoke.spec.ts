@@ -61,7 +61,7 @@ test('sign in, create, edit, complete, note, conflict and delete', async ({ page
   await page.goto('/');
   await page.getByLabel('Email').fill(server.email);
   await page.getByRole('button', { name: 'Send code' }).click();
-  await expect(page.getByText(`We sent a code to ${server.email}`)).toBeVisible();
+  await expect(page.getByText(`We sent an email to ${server.email}`)).toBeVisible();
   await page.getByLabel('Code').fill('000000');
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('alert')).toContainText('That code did not work');
@@ -128,4 +128,23 @@ test('sign in, create, edit, complete, note, conflict and delete', async ({ page
   expect(created.id && server.tables.tasks!.get(created.id as string)!.deleted_at_ms).not.toBeNull();
 
   expect(cspErrors).toEqual([]);
+});
+
+test('an emailed sign-in link signs in and is cleared from the address bar', async ({ page }) => {
+  const server = new MockSupabase(ORIGIN);
+  server.seed('tasks', phoneTask());
+  await server.install(page);
+  const s = server.session();
+  await page.goto(
+    `/#access_token=${s.access_token}&refresh_token=${s.refresh_token}&expires_in=3600&expires_at=${s.expires_at}&token_type=bearer&type=magiclink`,
+  );
+  await expect(page.getByLabel('Signed in account')).toContainText(server.email);
+  await expect(page.getByRole('button', { name: /Pay electricity bill/ })).toBeVisible();
+  expect(page.url()).not.toContain('access_token');
+});
+
+test('an expired sign-in link explains what to do', async ({ page }) => {
+  await new MockSupabase(ORIGIN).install(page);
+  await page.goto('/#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired');
+  await expect(page.getByRole('alert')).toContainText('expired or was already used');
 });
