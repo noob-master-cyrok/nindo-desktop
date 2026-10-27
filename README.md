@@ -23,7 +23,15 @@ Only the public URL and the **anon** key are used. They are public by design, an
 
 ## Hosting
 
-`dist/` is a static site that works from any path. Deploy it to GitHub Pages, Netlify or Vercel. Sign-in uses an emailed code rather than a link, so no redirect URL needs to be added in Supabase Auth.
+`dist/` is a static site that works from any path. It is published from its own repository, `nindo-desktop`, which holds only this folder (`git subtree split --prefix=desktop`). `.github/workflows/pages.yml` there tests, builds and deploys every push to `main` to GitHub Pages. The build reads the anon key from the repository variable `NINDO_SUPABASE_ANON_KEY`.
+
+To publish a change made in the Nindo repo:
+
+```sh
+git subtree push --prefix=desktop desktop-site main
+```
+
+(`desktop-site` is the git remote for the `nindo-desktop` repository.) Sign-in uses an emailed code rather than a link, so no redirect URL needs to be added in Supabase Auth.
 
 GitHub Pages cannot set response headers, so the Content-Security-Policy is a `<meta>` tag in the built `index.html`. It allows scripts and styles from the site only, and connections to the Supabase project only.
 
