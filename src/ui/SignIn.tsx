@@ -58,8 +58,10 @@ export function SignIn({ client }: { client: SupabaseClient }) {
   return (
     <main className="center">
       <div className="card narrow">
-        <p className="kicker">Nindo Tasks</p>
-        <h1>Sign in</h1>
+        <p className="wordmark">
+          Nindo <span className="kicker">Tasks</span>
+        </p>
+        <h1 className="sheet-title">Sign in</h1>
         <p className="muted">Use the same email as Nindo on your phone. Your tasks stay private to that account.</p>
 
         {!sentTo ? (

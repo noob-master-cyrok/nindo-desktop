@@ -10,6 +10,8 @@ export type InsertResult = { kind: 'inserted'; row: Row } | { kind: 'duplicate' 
 export interface ListQuery {
   /// Only rows whose columns equal these values (for example a task's links).
   eq?: Record<string, string>;
+  /// Only rows whose [column] is at least [value] (for example today's history).
+  since?: { column: string; value: number };
   includeDeleted?: boolean;
   from: number;
   to: number;

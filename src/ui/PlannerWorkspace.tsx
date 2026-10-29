@@ -1,16 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { PlannerRepo } from '../data/plannerRepo';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { PlannerRepo, SaveResult } from '../data/plannerRepo';
 import {
   decodeLabels,
+  filterActive,
+  groupByProject,
   isClosed,
   localIsoDate,
-  priorityLabels,
-  projectColor,
+  noFilter,
   projectColors,
   sortTasks,
   statusLabels,
   statuses,
+  summary,
   visibleTasks,
+  type Activity,
+  type Filter,
   type PlannerTask,
   type Project,
   type Scope,
@@ -18,9 +22,17 @@ import {
   type Status,
 } from '../domain/planner';
 import { plannerToCsv } from '../domain/plannerCsv';
+import { useSettings } from '../settings';
+import { Board } from './Board';
+import { DailyPlanningCard, Highlights, Summary } from './Cards';
+import { FilterDialog } from './FilterDialog';
+import { BoardIcon, Chevron, Close, Download, FilterIcon, Gear, ListIcon, Plus, Refresh, Search, Sliders, StatusIcon } from './Icons';
 import { Modal } from './Modal';
-import { StatusButton } from './StatusButton';
+import { Segmented } from './Segmented';
+import { SettingsDialog } from './SettingsDialog';
 import { TaskPanel } from './TaskPanel';
+import { TaskTile } from './TaskTile';
+import { Toast, type ToastMessage } from './Toast';
 
 /// The phone's status-circle tap: to do → in progress → done → to do.
 export function nextStatus(status: Status): Status {
@@ -29,41 +41,49 @@ export function nextStatus(status: Status): Status {
   return 'todo';
 }
 
-function dateLabel(iso: string): string {
-  const [y, m, d] = iso.split('-').map(Number) as [number, number, number];
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-}
-
 function sameScope(a: Scope, b: Scope): boolean {
   return typeof a === 'string' || typeof b === 'string' ? a === b : a.project === b.project;
 }
 
-export function PlannerWorkspace({
-  email,
-  planner,
-  onSignOut,
-}: {
-  email: string;
-  planner: PlannerRepo;
-  onSignOut: () => void;
-}) {
+function startOfToday(): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+type View = 'list' | 'board';
+
+export function PlannerWorkspace({ email, planner, onSignOut }: { email: string; planner: PlannerRepo; onSignOut: () => void }) {
+  const { num } = useSettings();
   const [tasks, setTasks] = useState<PlannerTask[] | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [activity, setActivity] = useState<Activity[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [scope, setScope] = useState<Scope>('all');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<Sort>('manual');
-  const [showClosed, setShowClosed] = useState(false);
+  const [filter, setFilter] = useState<Filter>(noFilter);
+  const [view, setView] = useState<View>('list');
+  const [collapsed, setCollapsed] = useState<Set<Status>>(() => new Set(['done', 'cancelled']));
   const [selected, setSelected] = useState<string | 'new' | null>(null);
   const [panelKey, setPanelKey] = useState('');
+  const [newTitle, setNewTitle] = useState('');
+  const [quick, setQuick] = useState('');
   const [newProject, setNewProject] = useState<{ name: string; color: number } | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<'filter' | 'settings' | null>(null);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
+  const quickRef = useRef<HTMLInputElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const say = useCallback((text: string, action?: ToastMessage['action']) => setToast({ id: Date.now(), text, action }), []);
+  const hideToast = useCallback(() => setToast(null), []);
 
   const load = useCallback(async () => {
     try {
-      const data = await planner.load();
+      const [data, today] = await Promise.all([planner.load(), planner.activitySince(startOfToday())]);
       setTasks(data.tasks);
       setProjects(data.projects);
+      setActivity(today);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load your tasks.');
@@ -78,19 +98,47 @@ export function PlannerWorkspace({
     return () => window.removeEventListener('focus', onFocus);
   }, [load]);
 
+  useEffect(() => {
+    // Desktop keys: N new task, / search, Escape closes the task.
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable;
+      if (document.querySelector('dialog[open]')) return;
+      if (e.key === 'Escape' && !typing) setSelected(null);
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault();
+        quickRef.current?.focus();
+      } else if (e.key === '/') {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const today = localIsoDate(new Date());
-  const all = tasks ?? [];
-  const shown = useMemo(() => visibleTasks(all, scope, search, today), [all, scope, search, today]);
-  const groups = useMemo(
-    () =>
-      statuses
-        .filter((s) => showClosed || !isClosed(s))
-        .map((s) => ({ status: s, items: sortTasks(shown.filter((t) => t.status === s), sort) })),
-    [shown, sort, showClosed],
-  );
+  const all = useMemo(() => tasks ?? [], [tasks]);
+  const shown = useMemo(() => sortTasks(visibleTasks(all, scope, search, today, filter), sort), [all, scope, search, today, filter, sort]);
+  const byStatus = useMemo(() => {
+    const out = {} as Record<Status, PlannerTask[]>;
+    for (const s of statuses) out[s] = shown.filter((t) => t.status === s);
+    return out;
+  }, [shown]);
+  const subtasksOf = useMemo(() => {
+    const map = new Map<string, PlannerTask[]>();
+    for (const t of all) if (t.parent_id) map.set(t.parent_id, [...(map.get(t.parent_id) ?? []), t]);
+    return map;
+  }, [all]);
+  const counts = summary(all, today, Date.now());
   const openCount = (s: Scope) => visibleTasks(all, s, '', today).filter((t) => !isClosed(t.status)).length;
   const current = selected && selected !== 'new' ? (all.find((t) => t.id === selected) ?? null) : null;
   const activeProjects = projects.filter((p) => !p.archived);
+  const projectById = new Map(projects.map((p) => [p.id, p]));
+  const allLabels = [...new Set(all.filter((t) => !t.parent_id).flatMap((t) => decodeLabels(t.labels)))].sort();
+  // Inside a status, tasks sit under their project unless one list is picked.
+  const grouped = scope === 'all' || scope === 'today' || scope === 'overdue';
 
   const replace = (row: PlannerTask) =>
     setTasks((list) => {
@@ -98,21 +146,72 @@ export function PlannerWorkspace({
       return row.deleted_at_ms == null ? [...rest, row] : rest;
     });
 
-  function open(id: string | 'new') {
+  function open(id: string | 'new', title = '') {
     setSelected(id);
+    setNewTitle(title);
     setPanelKey(id === 'new' ? `new-${Date.now()}` : id);
   }
 
-  async function cycle(task: PlannerTask) {
-    const result = await planner.setStatus(task, nextStatus(task.status));
-    if (result.status === 'saved') replace(result.row);
-    else if (result.status === 'conflict') {
+  /// Handles a write's result for a task in the list.
+  function settle(result: SaveResult<PlannerTask>, task: PlannerTask): boolean {
+    if (result.status === 'saved') {
+      replace(result.row);
+      return true;
+    }
+    if (result.status === 'conflict') {
       replace(result.current);
-      setNotice(`“${result.current.title}” changed on another device. It now shows the latest version; try again.`);
+      say(`“${result.current.title}” changed on another device. It now shows the latest version; try again.`);
     } else if (result.status === 'gone') {
       setTasks((list) => (list ?? []).filter((t) => t.id !== task.id));
-      setNotice('That task was deleted on another device.');
+      say('That task was deleted on another device.');
+    } else say(result.problems.join(' '));
+    return false;
+  }
+
+  async function guarded(action: () => Promise<boolean | void>) {
+    try {
+      await action();
+    } catch (e) {
+      say(e instanceof Error ? e.message : 'Something went wrong. Try again.');
     }
+  }
+
+  const cycle = (task: PlannerTask, status: Status = nextStatus(task.status)) =>
+    guarded(async () => {
+      if (settle(await planner.setStatus(task, status), task)) load();
+    });
+
+  const create = (title: string, status: Status = 'todo') =>
+    guarded(async () => {
+      const project = typeof scope === 'object' ? scope.project : null;
+      const result = await planner.create({ title, status, project_id: project }, all);
+      if (result.status === 'saved') {
+        replace(result.row);
+        say('Task added.');
+      } else if (result.status === 'invalid') say(result.problems.join(' '));
+    });
+
+  const move = (id: string, status: Status, beforeId: string | null) =>
+    guarded(async () => {
+      const task = all.find((t) => t.id === id);
+      if (task) settle(await planner.move(task, status, beforeId, all), task);
+    });
+
+  function deleted(task: PlannerTask, subtasks: PlannerTask[]) {
+    setTasks((list) => (list ?? []).filter((t) => t.id !== task.id && t.parent_id !== task.id));
+    setSelected(null);
+    say('Task deleted', {
+      label: 'Undo',
+      run: () =>
+        guarded(async () => {
+          const result = await planner.restore(task, subtasks);
+          if (result.status === 'saved') {
+            await load();
+            setSelected(task.id);
+            setPanelKey(`${task.id}-${Date.now()}`);
+          } else say('That task could not be brought back.');
+        }),
+    });
   }
 
   function exportCsv() {
@@ -125,253 +224,351 @@ export function PlannerWorkspace({
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  const tile = (t: PlannerTask, inGroup: boolean, card = false) => (
+    <TaskTile
+      key={t.id}
+      task={t}
+      card={card}
+      project={typeof scope === 'object' || inGroup ? undefined : projectById.get(t.project_id ?? '')}
+      subtasks={subtasksOf.get(t.id) ?? []}
+      today={today}
+      selected={t.id === selected}
+      onOpen={() => open(t.id)}
+      onCycle={() => cycle(t)}
+    />
+  );
+
+  const groupHeader = (projectId: string | null, count: number) => {
+    const p = projectId ? projectById.get(projectId) : undefined;
+    return (
+      <h3 className="group-head" key={`g-${projectId ?? 'inbox'}`}>
+        <span className={p ? 'dot' : 'dot hollow'} data-color={p?.color} aria-hidden="true" />
+        <span className="group-name">{p?.name ?? 'Inbox'}</span>
+        <span className="count">{num(count)}</span>
+      </h3>
+    );
+  };
+
   const scopes: { scope: Scope; label: string }[] = [
     { scope: 'all', label: 'All tasks' },
     { scope: 'today', label: 'Today' },
     { scope: 'overdue', label: 'Overdue' },
     { scope: 'inbox', label: 'Inbox' },
   ];
+  const scopeTitle =
+    typeof scope === 'object' ? (projectById.get(scope.project)?.name ?? 'Tasks') : scope === 'all' ? 'Tasks' : scopes.find((s) => s.scope === scope)!.label;
+  const narrowed = filterActive(filter) || sort !== 'manual';
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <strong>Nindo</strong> <span className="muted">Tasks</span>
+    <div className={selected ? 'app with-task' : 'app'}>
+      <nav className="sidebar" aria-label="Task lists">
+        <div className="wordmark">
+          Nindo <span className="kicker">Tasks</span>
         </div>
-        <div className="account" aria-label="Signed in account">
-          <span className="muted small">Signed in as</span> <strong>{email}</strong>
-        </div>
-        <div className="row">
-          <button onClick={exportCsv} disabled={!all.length}>
-            Export CSV
-          </button>
-          <button onClick={onSignOut}>Sign out</button>
-        </div>
-      </header>
-
-      <div className="layout">
-        <nav className="sidebar" aria-label="Task lists">
-          <button className="primary block" onClick={() => open('new')}>
-            New task
-          </button>
-          <ul>
-            {scopes.map(({ scope: s, label }) => (
-              <li key={label}>
-                <button
-                  className={sameScope(s, scope) ? 'filter active' : 'filter'}
-                  aria-current={sameScope(s, scope) ? 'true' : undefined}
-                  onClick={() => setScope(s)}
-                >
-                  <span>{label}</span>
-                  <span className="count">{openCount(s)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          <h3 className="side-head">Projects</h3>
-          <ul>
-            {activeProjects.map((p) => {
-              const s: Scope = { project: p.id };
-              return (
-                <li key={p.id}>
-                  <button
-                    className={sameScope(s, scope) ? 'filter active' : 'filter'}
-                    aria-current={sameScope(s, scope) ? 'true' : undefined}
-                    onClick={() => setScope(s)}
-                  >
-                    <span className="row tight">
-                      <span className="swatch" data-color={p.color % projectColors.length} aria-hidden="true" />
-                      {p.name}
-                    </span>
-                    <span className="count">{openCount(s)}</span>
-                  </button>
-                </li>
-              );
-            })}
-            <li>
-              <button className="filter muted" onClick={() => setNewProject({ name: '', color: 1 })}>
-                + New project
+        <ul className="nav-list">
+          {scopes.map(({ scope: s, label }) => (
+            <li key={label}>
+              <button className={sameScope(s, scope) ? 'nav active' : 'nav'} aria-current={sameScope(s, scope) ? 'true' : undefined} onClick={() => setScope(s)}>
+                <span>{label}</span>
+                <span className="count">{num(openCount(s))}</span>
               </button>
             </li>
-          </ul>
-        </nav>
+          ))}
+        </ul>
+        <h2 className="kicker side-head">Projects</h2>
+        <ul className="nav-list">
+          {activeProjects.map((p) => {
+            const s: Scope = { project: p.id };
+            return (
+              <li key={p.id}>
+                <button className={sameScope(s, scope) ? 'nav active' : 'nav'} aria-current={sameScope(s, scope) ? 'true' : undefined} onClick={() => setScope(s)}>
+                  <span className="nav-name">
+                    <span className="dot" data-color={p.color} aria-hidden="true" />
+                    {p.name}
+                  </span>
+                  <span className="count">{num(openCount(s))}</span>
+                </button>
+              </li>
+            );
+          })}
+          <li>
+            <button className="nav add" onClick={() => setNewProject({ name: '', color: 1 })}>
+              <span className="nav-name">
+                <Plus size={14} /> New project
+              </span>
+            </button>
+          </li>
+        </ul>
+        <div className="side-foot">
+          <button className="nav" onClick={() => setDialog('settings')}>
+            <span className="nav-name">
+              <Gear size={16} /> Settings
+            </span>
+          </button>
+          <p className="muted small side-email" title={email} aria-label="Signed in account">
+            {email}
+          </p>
+        </div>
+      </nav>
 
-        <main className="list-pane">
-          <div className="toolbar">
-            <input
-              type="search"
-              placeholder="Search tasks"
-              aria-label="Search tasks"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+      <main className="list-pane">
+        <header className="page-head">
+          <h1 className="page-title">{scopeTitle}</h1>
+          <div className="head-actions">
+            <button className="icon-button" aria-label="Filter" title="Filter and sort" onClick={() => setDialog('filter')}>
+              <FilterIcon on={narrowed} size={22} />
+            </button>
+            <Segmented<View>
+              label="View"
+              value={view}
+              options={[
+                { value: 'list', label: <ListIcon size={18} />, title: 'List' },
+                { value: 'board', label: <BoardIcon size={18} />, title: 'Board' },
+              ]}
+              onChange={setView}
             />
-            <label className="inline">
-              <span className="muted small">Sort</span>
-              <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
-                <option value="manual">Manual</option>
-                <option value="priority">Priority</option>
-                <option value="due">Due date</option>
-              </select>
-            </label>
-            <label className="check">
-              <input type="checkbox" checked={showClosed} onChange={(e) => setShowClosed(e.target.checked)} />
-              <span className="small">Show done</span>
-            </label>
-            <button onClick={load}>Refresh</button>
+            <button className="icon-button" aria-label="Refresh" title="Refresh" onClick={load}>
+              <Refresh />
+            </button>
+            <button className="icon-button" aria-label="Export CSV" title="Export CSV" onClick={exportCsv} disabled={!all.length}>
+              <Download />
+            </button>
           </div>
+        </header>
 
-          {notice && (
-            <p className="banner" role="status">
-              {notice}{' '}
-              <button className="link" onClick={() => setNotice(null)}>
-                Dismiss
-              </button>
-            </p>
-          )}
-          {error && (
-            <p className="error" role="alert">
-              {error}
-            </p>
-          )}
-          {tasks === null && !error && <p className="muted">Loading your tasks…</p>}
-          {tasks !== null && all.length === 0 && (
-            <p className="empty muted">
-              No tasks yet. Open Nindo on your phone once so it uploads your Tasks, or add one here.
-            </p>
-          )}
+        <Summary {...counts} />
+        <DailyPlanningCard
+          tasks={all}
+          activity={activity}
+          today={today}
+          onStart={(t) =>
+            guarded(async () => {
+              if (settle(await planner.setStatus(t, 'doing'), t)) {
+                say(`Daily planning started at ${new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`);
+                load();
+              }
+            })
+          }
+          onFinish={(t) =>
+            guarded(async () => {
+              if (settle(await planner.setStatus(t, 'done'), t)) {
+                say('Daily planning done');
+                load();
+              }
+            })
+          }
+        />
 
-          {tasks !== null &&
-            groups.map(({ status, items }) =>
-              items.length === 0 ? null : (
-                <section key={status} className="group" aria-label={statusLabels[status]}>
-                  <h2 className="group-head">
-                    {statusLabels[status]} <span className="count">{items.length}</span>
+        <div className="add-row">
+          <form
+            className="field-pill quick"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!quick.trim()) return;
+              create(quick.trim());
+              setQuick('');
+            }}
+          >
+            <Plus size={18} className="acc-ink" />
+            <input ref={quickRef} aria-label="Add a task" placeholder="Add a task" maxLength={300} value={quick} onChange={(e) => setQuick(e.target.value)} />
+            <button
+              type="button"
+              className="icon-button small"
+              aria-label="New task"
+              title="New task with every detail (N)"
+              onClick={() => {
+                open('new', quick);
+                setQuick('');
+              }}
+            >
+              <Sliders className="acc-ink" />
+            </button>
+          </form>
+          <label className="field-pill search">
+            <Search size={16} className="muted" />
+            <input ref={searchRef} type="search" aria-label="Search tasks" placeholder="Search tasks" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </label>
+        </div>
+
+        {(filterActive(filter) || sort !== 'manual') && (
+          <div className="chips">
+            <button className="chip on" aria-pressed="true" onClick={() => (setFilter(noFilter), setSort('manual'))}>
+              Filtered <Close size={12} />
+            </button>
+          </div>
+        )}
+
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
+        {tasks === null && !error && <p className="muted">Loading your tasks…</p>}
+        {tasks !== null && shown.length === 0 && (
+          <p className="empty muted">
+            {all.some((t) => !t.parent_id) ? 'No tasks match.' : 'No tasks here yet. Add one above, or open Nindo on your phone once so it uploads your tasks.'}
+          </p>
+        )}
+
+        {tasks !== null && shown.length > 0 && view === 'list' && (
+          <div className="sections">
+            {statuses.map((s) => {
+              const items = byStatus[s];
+              if (!items.length) return null;
+              const shut = collapsed.has(s);
+              return (
+                <section key={s} className="status-section" aria-label={statusLabels[s]}>
+                  <h2 className="section-head">
+                    <button
+                      className="section-toggle"
+                      aria-expanded={!shut}
+                      onClick={() =>
+                        setCollapsed((c) => {
+                          const next = new Set(c);
+                          if (!next.delete(s)) next.add(s);
+                          return next;
+                        })
+                      }
+                    >
+                      <span className={`s-${s}`}>
+                        <StatusIcon status={s} size={16} />
+                      </span>
+                      <span className="kicker">{statusLabels[s]}</span>
+                      <span className="count">{num(items.length)}</span>
+                      <Chevron up={!shut} size={14} className="push muted" />
+                    </button>
                   </h2>
-                  <ul className="tasks">
-                    {items.map((task) => {
-                      const subs = all.filter((s) => s.parent_id === task.id);
-                      const project = projects.find((p) => p.id === task.project_id);
-                      const overdue = !isClosed(task.status) && task.due_date !== null && task.due_date < today;
-                      return (
-                        <li key={task.id} className={task.id === selected ? 'task-row selected' : 'task-row'}>
-                          <StatusButton status={task.status} title={task.title} onClick={() => cycle(task)} />
-                          <button className="task-open" onClick={() => open(task.id)} aria-current={task.id === selected ? 'true' : undefined}>
-                            <span className="task-main">
-                              <span className={isClosed(task.status) ? 'task-title done' : 'task-title'}>
-                                {task.critical && <span className="critical">Critical</span>} {task.title}
-                              </span>
-                              <span className="task-meta">
-                                {task.priority > 0 && <span className={`prio p${task.priority}`}>{priorityLabels[task.priority]}</span>}
-                                {project && (
-                                  <span className="tag">
-                                    <span className="swatch" data-color={project.color % projectColors.length} aria-hidden="true" />{' '}
-                                    {project.name}
-                                  </span>
-                                )}
-                                {task.due_date && (
-                                  <span className={overdue ? 'overdue' : ''}>
-                                    {overdue ? 'Overdue · ' : 'Due '}
-                                    {dateLabel(task.due_date)}
-                                  </span>
-                                )}
-                                {subs.length > 0 && (
-                                  <span>
-                                    {subs.filter((s) => s.status === 'done').length}/{subs.length} sub-tasks
-                                  </span>
-                                )}
-                                {decodeLabels(task.labels).map((l) => (
-                                  <span key={l} className="tag">
-                                    #{l}
-                                  </span>
-                                ))}
-                              </span>
-                            </span>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
+                  {!shut &&
+                    (grouped ? (
+                      groupByProject(items, projects).map((g) => (
+                        <div key={g.projectId ?? 'inbox'}>
+                          {groupHeader(g.projectId, g.tasks.length)}
+                          <ul className="ruled">
+                            {g.tasks.map((t) => (
+                              <li key={t.id}>{tile(t, true)}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))
+                    ) : (
+                      <ul className="ruled">
+                        {items.map((t) => (
+                          <li key={t.id}>{tile(t, false)}</li>
+                        ))}
+                      </ul>
+                    ))}
                 </section>
-              ),
-            )}
-          {tasks !== null && all.length > 0 && groups.every((g) => g.items.length === 0) && (
-            <p className="empty muted">{search ? 'No tasks match that search.' : 'Nothing here.'}</p>
-          )}
-        </main>
+              );
+            })}
+          </div>
+        )}
 
-        <aside className="detail-pane">
-          {selected === 'new' || current ? (
-            <TaskPanel
-              key={panelKey}
-              task={selected === 'new' ? null : current}
-              defaultProject={typeof scope === 'object' ? scope.project : null}
-              all={all}
-              projects={projects}
-              planner={planner}
-              onSaved={(row) => {
-                replace(row);
-                setSelected(row.id);
-              }}
-              onSubtask={replace}
-              onGone={(id) => {
-                setTasks((list) => (list ?? []).filter((t) => t.id !== id && t.parent_id !== id));
-                setSelected(null);
-              }}
-              onClose={() => setSelected(null)}
-            />
-          ) : (
-            <p className="muted empty">Pick a task to see all its details, or add a new one.</p>
-          )}
-        </aside>
-      </div>
+        {tasks !== null && shown.length > 0 && view === 'board' && (
+          <Board
+            columns={byStatus}
+            projects={projects}
+            grouped={grouped}
+            groupHeader={groupHeader}
+            tile={(t) => tile(t, grouped, true)}
+            onMove={move}
+            onAdd={(status, title) => create(title, status)}
+          />
+        )}
 
-      <footer className="footer muted small">
-        Changes appear on your phone the next time it opens or syncs. Files, photos and timers stay on your phone.
-      </footer>
+        {tasks !== null && <Highlights tasks={all} activity={activity} projects={projects} dayStart={startOfToday()} onOpen={(id) => open(id)} />}
+
+        <p className="muted small foot-note">
+          Changes reach your phone the next time it opens or syncs. Timers, breaks, attendance, files and photos stay on your phone.
+        </p>
+      </main>
+
+      <aside className={selected ? 'detail-pane open' : 'detail-pane'} aria-label="Task" hidden={!selected}>
+        {(selected === 'new' || current) && (
+          <TaskPanel
+            key={panelKey}
+            task={selected === 'new' ? null : current}
+            initialTitle={newTitle}
+            defaultProject={typeof scope === 'object' ? scope.project : null}
+            all={all}
+            projects={projects}
+            planner={planner}
+            onToast={say}
+            onSaved={(row) => {
+              replace(row);
+              setSelected(row.id);
+              load();
+            }}
+            onSubtask={replace}
+            onDuplicated={(row) => {
+              load();
+              open(row.id);
+            }}
+            onDeleted={deleted}
+            onGone={(id) => {
+              setTasks((list) => (list ?? []).filter((t) => t.id !== id && t.parent_id !== id));
+              setSelected(null);
+            }}
+            onClose={() => setSelected(null)}
+          />
+        )}
+      </aside>
+
+      {dialog === 'filter' && (
+        <FilterDialog
+          filter={filter}
+          sort={sort}
+          labels={allLabels}
+          onClose={() => setDialog(null)}
+          onApply={(f, s) => {
+            setFilter(f);
+            setSort(s);
+            if (f.showClosed !== filter.showClosed && f.showClosed) setCollapsed(new Set());
+            setDialog(null);
+          }}
+        />
+      )}
+      {dialog === 'settings' && <SettingsDialog email={email} onSignOut={onSignOut} onClose={() => setDialog(null)} />}
 
       {newProject && (
         <Modal title="New project" onClose={() => setNewProject(null)}>
           <form
             className="stack"
-            onSubmit={async (e) => {
+            onSubmit={(e) => {
               e.preventDefault();
-              const result = await planner.createProject(newProject.name, newProject.color, projects);
-              if (result.status === 'saved') {
-                setProjects((list) => [...list, result.row]);
-                setScope({ project: result.row.id });
-                setNewProject(null);
-              } else if (result.status === 'invalid') setNotice(result.problems.join(' '));
+              guarded(async () => {
+                const result = await planner.createProject(newProject.name, newProject.color, projects);
+                if (result.status === 'saved') {
+                  setProjects((list) => [...list, result.row]);
+                  setScope({ project: result.row.id });
+                  setNewProject(null);
+                } else if (result.status === 'invalid') say(result.problems.join(' '));
+              });
             }}
           >
             <label className="field">
-              <span>Name</span>
-              <input
-                value={newProject.name}
-                maxLength={80}
-                required
-                autoFocus
-                onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
-              />
+              <span className="kicker">Name</span>
+              <input value={newProject.name} maxLength={80} required autoFocus onChange={(e) => setNewProject({ ...newProject, name: e.target.value })} />
             </label>
             <div className="field">
-              <span>Colour</span>
-              <div className="row">
+              <span className="kicker">Colour</span>
+              <div className="swatches" role="radiogroup" aria-label="Colour">
                 {projectColors.map((c, i) => (
                   <button
                     key={c}
                     type="button"
-                    className={newProject.color === i ? 'swatch-pick active' : 'swatch-pick'}
-                    data-color={i}
+                    role="radio"
+                    className="swatch-pick"
                     aria-label={`Colour ${i + 1}`}
-                    aria-pressed={newProject.color === i}
-                    title={projectColor(i)}
+                    aria-checked={newProject.color === i}
                     onClick={() => setNewProject({ ...newProject, color: i })}
-                  />
+                  >
+                    <span className="swatch-fill dot-fill" data-color={i} />
+                  </button>
                 ))}
               </div>
             </div>
             <div className="row end">
-              <button type="button" onClick={() => setNewProject(null)}>
+              <button type="button" className="secondary" onClick={() => setNewProject(null)}>
                 Cancel
               </button>
               <button className="primary" disabled={!newProject.name.trim()}>
@@ -381,6 +578,8 @@ export function PlannerWorkspace({
           </form>
         </Modal>
       )}
+
+      <Toast toast={toast} onDone={hideToast} />
     </div>
   );
 }

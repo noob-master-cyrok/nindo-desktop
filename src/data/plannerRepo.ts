@@ -1,6 +1,10 @@
 import {
+  decodeLabels,
+  encodeLabels,
   isClosed,
   newTask,
+  orderAt,
+  sortTasks,
   statusChange,
   validateTask,
   type Activity,
@@ -174,6 +178,68 @@ export class PlannerRepo {
       await casUpdate(this.store, 'planner_tasks', sub.id, sub.revision, { deleted_at_ms: now }, now);
     }
     return result;
+  }
+
+  /// Puts a deleted task and its sub-tasks back (Undo after a delete).
+  async restore(task: PlannerTask, subtasks: PlannerTask[]): Promise<SaveResult<PlannerTask>> {
+    const now = this.now();
+    const back = async (row: PlannerTask) => {
+      const fresh = await this.store.fetchById('planner_tasks', row.id);
+      if (!fresh) return null;
+      return this.store.updateIfRevision('planner_tasks', row.id, fresh.revision, buildPatch(fresh, { deleted_at_ms: null }, now));
+    };
+    const saved = await back(task);
+    if (!saved) return { status: 'gone' };
+    for (const sub of subtasks) await back(sub);
+    return { status: 'saved', row: saved as unknown as PlannerTask };
+  }
+
+  /// Drops [task] into [status] just before [beforeId], or at the end (the
+  /// board's drag), with [all] the tasks loaded now.
+  move(task: PlannerTask, status: Status, beforeId: string | null, all: PlannerTask[]): Promise<SaveResult<PlannerTask>> {
+    const column = sortTasks(
+      all.filter((t) => !t.parent_id && t.status === status && t.id !== task.id),
+      'manual',
+    );
+    const at = column.findIndex((t) => t.id === beforeId);
+    const changes = { ...statusChange(task, status, this.now()), sort_order: orderAt(column, at < 0 ? column.length : at) };
+    return this.update(task, changes);
+  }
+
+  /// A copy with its sub-tasks and links, "(copy)" added, as on the phone.
+  async duplicate(task: PlannerTask, all: PlannerTask[]): Promise<SaveResult<PlannerTask>> {
+    const copy = await this.create(
+      {
+        title: `${task.title} (copy)`.slice(0, 300),
+        project_id: task.project_id,
+        status: 'todo',
+        priority: task.priority,
+        due_date: task.due_date,
+        description: task.description,
+        labels: encodeLabels(decodeLabels(task.labels)),
+      },
+      all,
+    );
+    if (copy.status !== 'saved') return copy;
+    const subs = sortTasks(all.filter((t) => t.parent_id === task.id), 'manual');
+    for (const s of subs) await this.create({ title: s.title, parent_id: copy.row.id, project_id: task.project_id }, all);
+    const { links } = await this.details(task.id);
+    for (const l of links) await this.addLink(copy.row.id, l.url, l.title ?? '');
+    return copy;
+  }
+
+  /// History lines written since [sinceMs], for Today's highlights.
+  activitySince(sinceMs: number): Promise<Activity[]> {
+    return this.allSince<Activity>('planner_activity', sinceMs);
+  }
+
+  private async allSince<T>(table: Table, sinceMs: number, pageSize = 1000): Promise<T[]> {
+    const out: T[] = [];
+    for (let from = 0; ; from += pageSize) {
+      const page = await this.store.list(table, { since: { column: 'created_at_ms', value: sinceMs }, from, to: from + pageSize - 1 });
+      out.push(...(page as T[]));
+      if (page.length < pageSize) return out;
+    }
   }
 
   async createProject(name: string, color: number, existing: Project[]): Promise<SaveResult<Project>> {

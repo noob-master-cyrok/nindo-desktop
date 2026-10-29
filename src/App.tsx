@@ -22,7 +22,7 @@ export function App() {
     return (
       <main className="center">
         <div className="card narrow">
-          <h1>Nindo Tasks</h1>
+          <h1 className="sheet-title">Nindo Tasks</h1>
           <p>
             This build has no server settings. Copy <code>.env.example</code> to <code>.env.local</code>, fill in the
             public URL and anon key, then rebuild.

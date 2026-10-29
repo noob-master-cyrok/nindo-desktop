@@ -64,6 +64,7 @@ export class MockSupabase {
     return filters.every(([key, op, value]) => {
       const v = row[key];
       if (op === 'eq') return String(v) === value;
+      if (op === 'gte') return Number(v) >= Number(value);
       if (op === 'is') return value === 'null' ? v == null : true;
       return true;
     });

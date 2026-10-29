@@ -2,7 +2,8 @@ import { z } from 'zod';
 
 /// The phone's Tasks tab (the planner), as synced by migration 0005.
 
-export const statuses = ['doing', 'todo', 'backlog', 'done', 'cancelled'] as const;
+/// In board order, as on the phone.
+export const statuses = ['backlog', 'todo', 'doing', 'done', 'cancelled'] as const;
 export type Status = (typeof statuses)[number];
 
 export const statusLabels: Record<Status, string> = {
@@ -171,40 +172,237 @@ export function newTask(
   };
 }
 
-/// Order inside a status group, as on the phone: critical first, then the
-/// manual order.
+/// The hand-made order: sort order, then oldest first.
 export function byBoardOrder(a: PlannerTask, b: PlannerTask): number {
-  return Number(b.critical) - Number(a.critical) || a.sort_order - b.sort_order || a.created_at_ms - b.created_at_ms;
+  return a.sort_order - b.sort_order || a.created_at_ms - b.created_at_ms;
 }
 
-export type Sort = 'manual' | 'priority' | 'due';
+export type Sort = 'manual' | 'due' | 'priority' | 'updated';
 
+export const sortLabels: Record<Sort, string> = {
+  manual: 'My order',
+  due: 'Due date',
+  priority: 'Priority',
+  updated: 'Last changed',
+};
+
+/// [tasks] in [sort] order, as the phone sorts them: open critical tasks
+/// lead every order but the hand-made one.
 export function sortTasks(tasks: PlannerTask[], sort: Sort): PlannerTask[] {
   const list = [...tasks];
-  if (sort === 'priority') return list.sort((a, b) => b.priority - a.priority || byBoardOrder(a, b));
-  if (sort === 'due') {
-    return list.sort(
-      (a, b) =>
-        (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999') || byBoardOrder(a, b),
-    );
-  }
-  return list.sort(byBoardOrder);
+  const compare: (a: PlannerTask, b: PlannerTask) => number =
+    sort === 'due'
+      ? (a, b) =>
+          a.due_date === b.due_date
+            ? byBoardOrder(a, b)
+            : a.due_date === null
+              ? 1
+              : b.due_date === null
+                ? -1
+                : a.due_date.localeCompare(b.due_date)
+      : sort === 'priority'
+        ? (a, b) => b.priority - a.priority || byBoardOrder(a, b)
+        : sort === 'updated'
+          ? (a, b) => b.updated_at_ms - a.updated_at_ms
+          : byBoardOrder;
+  if (sort === 'manual') return list.sort(compare);
+  const rank = (t: PlannerTask) => (t.critical && !isClosed(t.status) ? 0 : 1);
+  return list.sort((a, b) => rank(a) - rank(b) || compare(a, b));
 }
 
 export type Scope = 'all' | 'inbox' | 'today' | 'overdue' | { project: string };
 
-/// Top-level tasks (not sub-tasks) in [scope], matching [search].
-export function visibleTasks(tasks: PlannerTask[], scope: Scope, search: string, today: string): PlannerTask[] {
-  const needle = search.trim().toLowerCase();
+export type Due = 'any' | 'overdue' | 'today' | 'week' | 'none';
+
+export const dueLabels: Record<Due, string> = {
+  any: 'Any time',
+  overdue: 'Overdue',
+  today: 'Due today',
+  week: 'Next 7 days',
+  none: 'No date',
+};
+
+/// The phone's filter sheet: priorities, labels, due and done.
+export interface Filter {
+  priorities: number[];
+  labels: string[];
+  due: Due;
+  showClosed: boolean;
+}
+
+export const noFilter: Filter = { priorities: [], labels: [], due: 'any', showClosed: true };
+
+export function filterActive(f: Filter): boolean {
+  return f.priorities.length > 0 || f.labels.length > 0 || f.due !== 'any' || !f.showClosed;
+}
+
+/// [iso] moved by [days].
+export function addDays(iso: string, days: number): string {
+  const [y, m, d] = iso.split('-').map(Number) as [number, number, number];
+  return localIsoDate(new Date(y, m - 1, d + days));
+}
+
+export function isOverdue(t: Pick<PlannerTask, 'status' | 'due_date'>, today: string): boolean {
+  return !isClosed(t.status) && t.due_date !== null && t.due_date < today;
+}
+
+/// Top-level tasks (not sub-tasks) in [scope], matching [search] (every
+/// word, as on the phone) and [filter].
+export function visibleTasks(
+  tasks: PlannerTask[],
+  scope: Scope,
+  search: string,
+  today: string,
+  filter: Filter = noFilter,
+): PlannerTask[] {
+  const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const weekEnd = addDays(today, 7);
   return tasks.filter((t) => {
     if (t.parent_id) return false;
-    if (needle && !`${t.title} ${t.labels} ${t.description}`.toLowerCase().includes(needle)) return false;
+    if (words.length) {
+      const text = `${t.title} ${t.description} ${t.labels}`.toLowerCase();
+      if (!words.every((w) => text.includes(w))) return false;
+    }
+    if (filter.priorities.length && !filter.priorities.includes(t.priority)) return false;
+    if (filter.labels.length && !decodeLabels(t.labels).some((l) => filter.labels.includes(l))) return false;
+    if (!filter.showClosed && isClosed(t.status)) return false;
+    const d = t.due_date;
+    if (filter.due === 'overdue' && !isOverdue(t, today)) return false;
+    if (filter.due === 'today' && d !== today) return false;
+    if (filter.due === 'week' && (d === null || d < today || d > weekEnd)) return false;
+    if (filter.due === 'none' && d !== null) return false;
     if (scope === 'all') return true;
     if (scope === 'inbox') return !t.project_id;
     if (scope === 'today') return !isClosed(t.status) && (t.due_date === today || (t.start_date !== null && t.start_date <= today && (t.due_date ?? today) >= today));
-    if (scope === 'overdue') return !isClosed(t.status) && t.due_date !== null && t.due_date < today;
+    if (scope === 'overdue') return isOverdue(t, today);
     return t.project_id === scope.project;
   });
+}
+
+/// [tasks] split by project, keeping their order: projects in [projects]
+/// order, then tasks with no (or an unknown) project, under null, last.
+export function groupByProject(tasks: PlannerTask[], projects: Project[]): { projectId: string | null; tasks: PlannerTask[] }[] {
+  const known = new Set(projects.map((p) => p.id));
+  const groups = new Map<string | null, PlannerTask[]>();
+  for (const t of tasks) {
+    const id = t.project_id && known.has(t.project_id) ? t.project_id : null;
+    groups.set(id, [...(groups.get(id) ?? []), t]);
+  }
+  return [
+    ...projects.filter((p) => groups.has(p.id)).map((p) => ({ projectId: p.id as string | null, tasks: groups.get(p.id)! })),
+    ...(groups.has(null) ? [{ projectId: null, tasks: groups.get(null)! }] : []),
+  ];
+}
+
+/// The phone's summary strip, over top-level tasks.
+export function summary(tasks: PlannerTask[], today: string, now: number) {
+  const top = tasks.filter((t) => !t.parent_id);
+  const weekAgo = now - 7 * 24 * 3_600_000;
+  return {
+    open: top.filter((t) => !isClosed(t.status)).length,
+    doing: top.filter((t) => t.status === 'doing').length,
+    overdue: top.filter((t) => isOverdue(t, today)).length,
+    doneWeek: top.filter((t) => t.status === 'done' && t.completed_at_ms !== null && t.completed_at_ms > weekAgo).length,
+  };
+}
+
+/// Sort order for a task dropped at [index] of [column] (the other tasks in
+/// the target status, in order), like the phone's board.
+export function orderAt(column: PlannerTask[], index: number): number {
+  const i = Math.max(0, Math.min(index, column.length));
+  const before = i === 0 ? null : column[i - 1]!.sort_order;
+  const after = i >= column.length ? null : column[i]!.sort_order;
+  if (before === null && after === null) return 1;
+  if (before === null) return after! - 1;
+  if (after === null) return before + 1;
+  return (before + after) / 2;
+}
+
+/// Daily planning tasks have fixed ids, one a day.
+export function dailyPlanningId(today: string): string {
+  return `daily-planning-${today}`;
+}
+
+/// "1 h 25 min", "40 min".
+export function durationLabel(minutes: number, num: (n: number) => string = String): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${num(m)} min`;
+  if (m === 0) return `${num(h)} h`;
+  return `${num(h)} h ${num(m)} min`;
+}
+
+/// Minutes logged on a history line ("focus" and "time" carry minutes).
+export function loggedMinutes(a: Pick<Activity, 'kind' | 'body'>): number {
+  if (a.kind !== 'focus' && a.kind !== 'time') return 0;
+  const n = Number.parseInt(a.body, 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/// Critical, high or urgent.
+export function isMajor(t: Pick<PlannerTask, 'critical' | 'priority'>): boolean {
+  return t.critical || t.priority >= 3;
+}
+
+/// Which of today's tasks Today's highlights lists.
+export interface HighlightFilter {
+  statuses: Status[];
+  /// Project ids; null stands for Inbox. Empty: every project.
+  projects: (string | null)[];
+  majorOnly: boolean;
+}
+
+export const defaultHighlights: HighlightFilter = { statuses: ['done'], projects: [], majorOnly: false };
+
+export interface Highlight {
+  task: PlannerTask;
+  minutesToday: number;
+}
+
+/// Today's highlights, as on the phone: top-level tasks finished (or worked
+/// on, or dropped) on the day that starts at [dayStart], the major ones
+/// first, then by time spent, then the latest first. Time spent comes from
+/// today's focus and time lines in the tasks' history.
+export function todaysHighlights(
+  tasks: PlannerTask[],
+  activity: Pick<Activity, 'task_id' | 'kind' | 'body' | 'created_at_ms'>[],
+  dayStart: number,
+  filter: HighlightFilter = defaultHighlights,
+): Highlight[] {
+  const dayEnd = dayStart + 24 * 3_600_000;
+  const isToday = (ms: number | null) => ms !== null && ms >= dayStart && ms < dayEnd;
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const minutes = new Map<string, number>();
+  for (const a of activity) {
+    if (!isToday(a.created_at_ms)) continue;
+    const t = byId.get(a.task_id);
+    const id = t?.parent_id ?? a.task_id;
+    minutes.set(id, (minutes.get(id) ?? 0) + loggedMinutes(a));
+  }
+  const today = (t: PlannerTask) =>
+    t.status === 'done'
+      ? isToday(t.completed_at_ms)
+      : t.status === 'doing'
+        ? (minutes.get(t.id) ?? 0) > 0
+        : t.status === 'cancelled'
+          ? isToday(t.updated_at_ms)
+          : false;
+  const list = tasks
+    .filter(
+      (t) =>
+        t.deleted_at_ms == null &&
+        !t.parent_id &&
+        filter.statuses.includes(t.status) &&
+        today(t) &&
+        (filter.projects.length === 0 || filter.projects.includes(t.project_id)) &&
+        (!filter.majorOnly || isMajor(t)),
+    )
+    .map((task) => ({ task, minutesToday: minutes.get(task.id) ?? 0 }));
+  const weight = (t: PlannerTask) => (t.critical ? 10 : 0) + t.priority;
+  const when = (t: PlannerTask) => t.completed_at_ms ?? t.updated_at_ms;
+  return list.sort(
+    (a, b) => weight(b.task) - weight(a.task) || b.minutesToday - a.minutesToday || when(b.task) - when(a.task),
+  );
 }
 
 /// The changes that move a task to [status], keeping completed_at_ms in step

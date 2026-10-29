@@ -18,7 +18,7 @@ import {
   type TaskEdit,
 } from '../domain/planner';
 import { ConflictDialog } from './ConflictDialog';
-import { Confirm } from './Modal';
+import { Close, Copy, LinkIcon, Trash } from './Icons';
 
 interface Form {
   title: string;
@@ -33,9 +33,9 @@ interface Form {
   critical: boolean;
 }
 
-function toForm(task: PlannerTask | null, defaultProject: string | null): Form {
+function toForm(task: PlannerTask | null, defaultProject: string | null, title = ''): Form {
   return {
-    title: task?.title ?? '',
+    title: task?.title ?? title,
     description: task?.description ?? '',
     status: task?.status ?? 'todo',
     priority: task?.priority ?? 0,
@@ -72,32 +72,40 @@ function when(ms: number): string {
 
 export function TaskPanel({
   task,
+  initialTitle = '',
   defaultProject,
   all,
   projects,
   planner,
+  onToast,
   onSaved,
   onSubtask,
+  onDuplicated,
+  onDeleted,
   onGone,
   onClose,
 }: {
   task: PlannerTask | null;
+  /// What was typed in quick add before opening the full window.
+  initialTitle?: string;
   defaultProject: string | null;
   all: PlannerTask[];
   projects: Project[];
   planner: PlannerRepo;
+  onToast: (text: string) => void;
   onSaved: (row: PlannerTask) => void;
   onSubtask: (row: PlannerTask) => void;
+  onDuplicated: (row: PlannerTask) => void;
+  /// Deleted with its sub-tasks; the page offers Undo.
+  onDeleted: (task: PlannerTask, subtasks: PlannerTask[]) => void;
   onGone: (id: string) => void;
   onClose: () => void;
 }) {
   const [base, setBase] = useState(task);
-  const [form, setForm] = useState(() => toForm(task, defaultProject));
+  const [form, setForm] = useState(() => toForm(task, defaultProject, initialTitle));
   const [problems, setProblems] = useState<string[]>([]);
-  const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState<{ current: PlannerTask; mine: Record<string, unknown> } | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [links, setLinks] = useState<Link[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [newSub, setNewSub] = useState('');
@@ -132,19 +140,17 @@ export function TaskPanel({
 
   function patch(fields: Partial<Form>) {
     setForm((f) => ({ ...f, ...fields }));
-    setMessage(null);
   }
 
   /// Runs a write and handles every outcome the same way.
   async function run<T>(action: () => Promise<SaveResult<T>>, onSaved: (row: T) => void, done?: string) {
     setBusy(true);
     setProblems([]);
-    setMessage(null);
     try {
       const result = await action();
       if (result.status === 'saved') {
         onSaved(result.row);
-        if (done) setMessage(done);
+        if (done) onToast(done);
       } else if (result.status === 'invalid') setProblems(result.problems);
       else if (result.status === 'conflict') {
         const current = result.current as unknown;
@@ -180,9 +186,9 @@ export function TaskPanel({
   return (
     <section className="editor" aria-label={base ? 'Task details' : 'New task'}>
       <header className="editor-head">
-        <h2>{base ? 'Task' : 'New task'}</h2>
-        <button className="link" onClick={onClose}>
-          Close
+        <h2 className="sheet-title">{base ? 'Task' : 'New task'}</h2>
+        <button className="icon-button" aria-label="Close" title="Close (Esc)" onClick={onClose}>
+          <Close />
         </button>
       </header>
 
@@ -190,7 +196,7 @@ export function TaskPanel({
         <fieldset disabled={busy} className="stack">
           <label className="field">
             <span>Title</span>
-            <input value={form.title} maxLength={300} required autoFocus={!base} onChange={(e) => patch({ title: e.target.value })} />
+            <input className="title-input" value={form.title} maxLength={300} required autoFocus={!base} onChange={(e) => patch({ title: e.target.value })} />
           </label>
 
           <div className="grid2">
@@ -251,9 +257,13 @@ export function TaskPanel({
             <input value={form.labels} onChange={(e) => patch({ labels: e.target.value })} />
           </label>
 
-          <label className="check">
-            <input type="checkbox" checked={form.critical} onChange={(e) => patch({ critical: e.target.checked })} />
-            <span>Critical (listed first)</span>
+          <label className="switch-row">
+            <span>
+              Critical
+              <br />
+              <span className="muted small">Listed first, and on Critical today</span>
+            </span>
+            <input type="checkbox" role="switch" className="switch" checked={form.critical} onChange={(e) => patch({ critical: e.target.checked })} />
           </label>
 
           <label className="field">
@@ -269,20 +279,34 @@ export function TaskPanel({
             ))}
           </ul>
         )}
-        {message && (
-          <p className="ok" role="status">
-            {message}
-          </p>
-        )}
-
         <div className="row">
           <button className="primary" disabled={busy || !dirty}>
             {base ? 'Save' : 'Add task'}
           </button>
           {base && (
-            <button type="button" className="danger push" disabled={busy} onClick={() => setConfirmDelete(true)}>
-              Delete
-            </button>
+            <>
+              <button
+                type="button"
+                className="secondary push"
+                disabled={busy}
+                onClick={() => run(() => planner.duplicate(base, all), onDuplicated, 'Task duplicated.')}
+              >
+                <Copy size={16} /> Duplicate
+              </button>
+              <button
+                type="button"
+                className="danger"
+                disabled={busy}
+                onClick={() =>
+                  run(
+                    () => planner.remove(base, subtasks),
+                    () => onDeleted(base, subtasks),
+                  )
+                }
+              >
+                <Trash size={16} /> Delete
+              </button>
+            </>
           )}
         </div>
         {base && (
@@ -296,7 +320,7 @@ export function TaskPanel({
       {base && (
         <>
           <section className="sub" aria-label="Sub-tasks">
-            <h3>Sub-tasks</h3>
+            <h3 className="kicker">Sub-tasks</h3>
             <ul className="steps">
               {subtasks.map((s) => (
                 <li key={s.id}>
@@ -310,12 +334,12 @@ export function TaskPanel({
                   <span className={isClosed(s.status) ? 'task-title done' : ''}>{s.title}</span>
                   <button
                     type="button"
-                    className="icon push"
+                    className="icon-button small push"
                     aria-label={`Delete sub-task ${s.title}`}
                     disabled={busy}
                     onClick={() => run(() => planner.remove(s, []), () => onSubtask({ ...s, deleted_at_ms: Date.now() }))}
                   >
-                    ×
+                    <Close size={14} />
                   </button>
                 </li>
               ))}
@@ -335,26 +359,26 @@ export function TaskPanel({
               }}
             >
               <input aria-label="New sub-task" placeholder="Add a sub-task" maxLength={300} value={newSub} onChange={(e) => setNewSub(e.target.value)} />
-              <button disabled={busy || !newSub.trim()}>Add</button>
+              <button className="secondary" disabled={busy || !newSub.trim()}>Add</button>
             </form>
           </section>
 
           <section className="sub" aria-label="Links">
-            <h3>Links</h3>
+            <h3 className="kicker">Links</h3>
             <ul className="link-list">
               {links.map((l) => (
                 <li key={l.id}>
                   <a href={l.url} target="_blank" rel="noopener noreferrer">
-                    {l.title || l.url}
+                    <LinkIcon size={14} /> {l.title || l.url}
                   </a>
                   <button
                     type="button"
-                    className="icon"
+                    className="icon-button small"
                     aria-label={`Remove link ${l.title || l.url}`}
                     disabled={busy}
                     onClick={() => run(() => planner.removeLink(l), () => setLinks((list) => list.filter((x) => x.id !== l.id)))}
                   >
-                    ×
+                    <Close size={14} />
                   </button>
                 </li>
               ))}
@@ -374,12 +398,12 @@ export function TaskPanel({
             >
               <input aria-label="Link address" placeholder="https://…" value={newLink.url} onChange={(e) => setNewLink({ ...newLink, url: e.target.value })} />
               <input aria-label="Link title" placeholder="Title (optional)" value={newLink.title} onChange={(e) => setNewLink({ ...newLink, title: e.target.value })} />
-              <button disabled={busy || !newLink.url.trim()}>Add link</button>
+              <button className="secondary" disabled={busy || !newLink.url.trim()}>Add link</button>
             </form>
           </section>
 
           <section className="sub" aria-label="Activity">
-            <h3>Activity</h3>
+            <h3 className="kicker">Activity</h3>
             <ul className="activity">
               {activity.map((a) => (
                 <li key={a.id} className={a.kind === 'comment' ? 'comment' : 'history'}>
@@ -403,7 +427,7 @@ export function TaskPanel({
             >
               <textarea rows={2} aria-label="New comment" placeholder="Write a comment" value={comment} onChange={(e) => setComment(e.target.value)} />
               <div>
-                <button disabled={busy || !comment.trim()}>Comment</button>
+                <button className="secondary" disabled={busy || !comment.trim()}>Comment</button>
               </div>
             </form>
           </section>
@@ -418,25 +442,12 @@ export function TaskPanel({
           onKeepTheirs={() => {
             applySaved(conflict.current);
             setConflict(null);
-            setMessage('Showing the version saved on your other device.');
+            onToast('Showing the version saved on your other device.');
           }}
           onApplyMine={() => {
             const { current, mine } = conflict;
             setConflict(null);
             run(() => planner.update(current, mine as TaskEdit), applySaved, 'Saved.');
-          }}
-        />
-      )}
-      {confirmDelete && base && (
-        <Confirm
-          title="Delete this task?"
-          body={<p>“{base.title}” and its sub-tasks will be removed here and from your phone the next time it syncs.</p>}
-          action="Delete"
-          danger
-          onClose={() => setConfirmDelete(false)}
-          onConfirm={() => {
-            setConfirmDelete(false);
-            run(() => planner.remove(base, subtasks), applySaved);
           }}
         />
       )}

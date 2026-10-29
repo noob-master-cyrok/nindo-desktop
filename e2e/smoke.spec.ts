@@ -77,7 +77,7 @@ test('sign in and work through the Tasks screen', async ({ page }) => {
   // Grouped by status; sub-tasks stay inside their task.
   await expect(page.getByRole('region', { name: 'In progress' })).toContainText('Prepare client deck');
   await expect(page.getByRole('region', { name: 'Backlog' })).toContainText('Renew passport');
-  await expect(page.getByRole('region', { name: 'In progress' })).toContainText('0/1 sub-tasks');
+  await expect(page.getByRole('region', { name: 'In progress' })).toContainText('0/1');
   await expect(page.getByText('Collect numbers')).toHaveCount(0);
   await page.screenshot({ path: 'test-results/list.png', fullPage: true });
 
@@ -103,7 +103,7 @@ test('sign in and work through the Tasks screen', async ({ page }) => {
   // Sub-task, link, comment.
   await page.getByLabel('Done: Collect numbers').click();
   await expect(page.getByLabel('Done: Collect numbers')).toBeChecked();
-  await expect(page.getByRole('region', { name: 'In progress' })).toContainText('1/1 sub-tasks');
+  await expect(page.getByRole('region', { name: 'In progress' })).toContainText('1/1');
   await page.getByLabel('New sub-task').fill('Rehearse');
   await page.getByRole('region', { name: 'Sub-tasks' }).getByRole('button', { name: 'Add' }).click();
   await expect(page.getByRole('region', { name: 'Sub-tasks' })).toContainText('Rehearse');
@@ -124,7 +124,7 @@ test('sign in and work through the Tasks screen', async ({ page }) => {
   await page.screenshot({ path: 'test-results/conflict.png' });
   expect(server.tables.planner_tasks!.get(TASK_ID)!.estimate_minutes).toBe(90);
   await page.getByRole('button', { name: 'Use my changes' }).click();
-  await expect(page.getByRole('status')).toContainText('Saved.');
+  await expect.poll(() => server.tables.planner_tasks!.get(TASK_ID)!.estimate_minutes).toBe(120);
   expect(server.tables.planner_tasks!.get(TASK_ID)).toMatchObject({ title: 'Prepare client deck v2', estimate_minutes: 120 });
 
   // Status circle: in progress → done.
@@ -141,11 +141,49 @@ test('sign in and work through the Tasks screen', async ({ page }) => {
   const created = [...server.tables.planner_tasks!.values()].find((r) => r.title === 'Book venue')!;
   expect(created).toMatchObject({ project_id: PROJECT_ID, status: 'todo', owner_id: server.userId });
 
-  // Delete (soft).
+  // Delete (soft), then Undo.
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click();
   await expect(page.getByRole('button', { name: /Book venue/ })).toHaveCount(0);
   expect(server.tables.planner_tasks!.get(created.id as string)!.deleted_at_ms).not.toBeNull();
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(page.getByRole('button', { name: /Book venue/ }).first()).toBeVisible();
+  expect(server.tables.planner_tasks!.get(created.id as string)!.deleted_at_ms).toBeNull();
+
+  // Duplicate.
+  await page.getByRole('button', { name: 'Duplicate' }).click();
+  await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Book venue (copy)');
+
+  // Quick add, then drag it on the board to In progress.
+  await page.getByRole('button', { name: /^All tasks/ }).click();
+  await page.getByLabel('Add a task').fill('Call the printer');
+  await page.getByLabel('Add a task').press('Enter');
+  await expect(page.getByRole('button', { name: 'Call the printer', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('radio', { name: 'Board' }).click();
+  await page.getByRole('button', { name: 'Call the printer', exact: true }).dragTo(page.getByRole('region', { name: 'In progress' }));
+  await expect(page.getByRole('region', { name: 'In progress' })).toContainText('Call the printer');
+  const printer = [...server.tables.planner_tasks!.values()].find((r) => r.title === 'Call the printer')!;
+  expect(printer).toMatchObject({ status: 'doing', project_id: null });
+  await page.getByRole('radio', { name: 'List' }).click();
+
+  // Filter: urgent only.
+  await page.getByRole('button', { name: 'Filter', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Urgent' }).click();
+  await page.getByRole('button', { name: 'Show tasks' }).click();
+  await expect(page.getByRole('button', { name: 'Call the printer', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Prepare client deck v2/ }).first()).toBeVisible();
+  await page.getByRole('button', { name: /Filtered/ }).click();
+  await expect(page.getByRole('button', { name: 'Call the printer', exact: true })).toBeVisible();
+
+  // Settings: App colors and dark mode stay after a reload.
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('radio', { name: 'Teal' }).click();
+  await page.getByRole('radio', { name: 'Dark' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Done' }).click();
+  await page.reload();
+  await expect(page.getByLabel('Signed in account')).toContainText(server.email);
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--acc').trim())).toBe('#4FB8AC');
+  expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('dark');
 
   expect(cspErrors).toEqual([]);
 });

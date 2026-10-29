@@ -168,4 +168,46 @@ describe('PlannerRepo', () => {
     expect((await repo.create({ title: 'Once' })).status).toBe('saved');
     expect(store.tables.planner_tasks.size).toBe(1);
   });
+
+  it('moves a card into another column between two cards', async () => {
+    const a = store.seed('planner_tasks', { ...newTask('a', 1, { title: 'A', status: 'doing' }), sort_order: 1 }) as unknown as PlannerTask;
+    const b = store.seed('planner_tasks', { ...newTask('b', 1, { title: 'B', status: 'doing' }), sort_order: 2 }) as unknown as PlannerTask;
+    const c = store.seed('planner_tasks', newTask('c', 1, { title: 'C', status: 'todo' })) as unknown as PlannerTask;
+    const result = await repo.move(c, 'doing', 'b', [a, b, c]);
+    expect((result as { row: PlannerTask }).row).toMatchObject({ status: 'doing', sort_order: 1.5 });
+    const end = await repo.move((result as { row: PlannerTask }).row, 'done', null, [a, b]);
+    expect((end as { row: PlannerTask }).row).toMatchObject({ status: 'done', sort_order: 1, completed_at_ms: 50_000 });
+    expect(history()).toEqual(['status:doing', 'status:done']);
+  });
+
+  it('deletes and brings back a task with its sub-tasks', async () => {
+    const task = store.seed('planner_tasks', phoneTask()) as unknown as PlannerTask;
+    const sub = store.seed('planner_tasks', newTask('sub-1', 1, { title: 'Step', parent_id: ID })) as unknown as PlannerTask;
+    expect((await repo.remove(task, [sub])).status).toBe('saved');
+    expect(store.tables.planner_tasks.get(ID)!.deleted_at_ms).toBe(50_000);
+    clock = 51_000;
+    const back = await repo.restore(task, [sub]);
+    expect(back.status).toBe('saved');
+    expect(store.tables.planner_tasks.get(ID)).toMatchObject({ deleted_at_ms: null, future_column: 'kept', updated_at_ms: 51_000 });
+    expect(store.tables.planner_tasks.get('sub-1')!.deleted_at_ms).toBeNull();
+  });
+
+  it('duplicates with sub-tasks and links, as to do', async () => {
+    const task = store.seed('planner_tasks', phoneTask({ status: 'doing', due_date: '2026-11-02', description: 'Notes' })) as unknown as PlannerTask;
+    const sub = store.seed('planner_tasks', newTask('sub-1', 1, { title: 'Step', parent_id: ID })) as unknown as PlannerTask;
+    store.seed('planner_links', { id: 'l1', task_id: ID, url: 'https://example.test', title: 'Spec', created_at_ms: 1, updated_at_ms: 1, deleted_at_ms: null });
+    const result = await repo.duplicate(task, [task, sub]);
+    expect(result.status).toBe('saved');
+    const copy = (result as { row: PlannerTask }).row;
+    expect(copy).toMatchObject({ title: 'Ship desktop (copy)', status: 'todo', priority: 3, project_id: 'p1', labels: 'web,sync', due_date: '2026-11-02', description: 'Notes' });
+    const rows = [...store.tables.planner_tasks.values()] as unknown as PlannerTask[];
+    expect(rows.filter((r) => r.parent_id === copy.id).map((r) => r.title)).toEqual(['Step']);
+    expect([...store.tables.planner_links.values()].filter((l) => l.task_id === copy.id).map((l) => l.title)).toEqual(['Spec']);
+  });
+
+  it("reads today's history only", async () => {
+    store.seed('planner_activity', { id: 'old', task_id: ID, kind: 'time', body: '5', created_at_ms: 10, updated_at_ms: 10, deleted_at_ms: null });
+    store.seed('planner_activity', { id: 'new', task_id: ID, kind: 'time', body: '5', created_at_ms: 500, updated_at_ms: 500, deleted_at_ms: null });
+    expect((await repo.activitySince(100)).map((a) => a.id)).toEqual(['new']);
+  });
 });

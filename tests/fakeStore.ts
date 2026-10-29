@@ -66,6 +66,7 @@ export class FakeStore implements Store {
       .filter((r) => r.owner_id === this.userId)
       .filter((r) => query.includeDeleted || r.deleted_at_ms == null)
       .filter((r) => Object.entries(query.eq ?? {}).every(([k, v]) => r[k] === v))
+      .filter((r) => !query.since || Number(r[query.since.column]) >= query.since.value)
       .sort((a, b) => a.id.localeCompare(b.id))
       .slice(query.from, query.to + 1)
       .map((r) => structuredClone(r));

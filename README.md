@@ -23,27 +23,34 @@ Only the public URL and the **anon** key are used. They are public by design, an
 
 ## Hosting
 
-`dist/` is a static site that works from any path. It is published from its own repository, `nindo-desktop`, which holds only this folder (`git subtree split --prefix=desktop`). `.github/workflows/pages.yml` there tests, builds and deploys every push to `main` to GitHub Pages. The build reads the anon key from the repository variable `NINDO_SUPABASE_ANON_KEY`.
+`dist/` is a static site that works from any path. It is published from its own public repository, [noob-master-cyrok/nindo-desktop](https://github.com/noob-master-cyrok/nindo-desktop), which holds only this folder. `.github/workflows/pages.yml` there tests, builds and deploys every push to `main` to https://noob-master-cyrok.github.io/nindo-desktop/. The build reads the anon key from the repository variable `NINDO_SUPABASE_ANON_KEY`.
 
-To publish a change made in the Nindo repo:
+To publish what is committed here:
 
 ```sh
-git subtree push --prefix=desktop desktop-site main
+desktop/scripts/publish.sh
 ```
 
-(`desktop-site` is the git remote for the `nindo-desktop` repository.) For sign-in links to work, add the site URL to Supabase Auth → URL Configuration → Redirect URLs. The code alone needs no setting, as long as the email template includes `{{ .Token }}`.
-
-GitHub Pages cannot set response headers, so the Content-Security-Policy is a `<meta>` tag in the built `index.html`. It allows scripts and styles from the site only, and connections to the Supabase project only.
+The script needs a git remote `desktop-site` for that repository. It adds one commit on top of its `main`, so that repository's history is never rewritten.
 
 ## What it does
 
-- **Sign in:** with the code from the email, or the email's sign-in link. The site URL must be in Supabase Auth → Redirect URLs. The desktop never creates accounts (`shouldCreateUser: false`). "Send code" waits 60 seconds between requests. The signed-in email is always shown at the top.
-- **Lists:** All tasks, Today (due today or running between start and due), Overdue, Inbox, and one list per project, with open counts. Tasks are grouped by status (In progress, To do, Backlog; Done and Cancelled under "Show done"), critical first, then the phone's manual order. You can also sort by priority or due date, and search titles, labels and descriptions.
-- **Status circle:** works like the phone: to do → in progress → done → to do.
-- **Task details:** every field the phone has, plus sub-tasks (add, tick, delete), links (add, remove) and the activity log with comments. Changes are recorded in the history the same way the phone records them.
-- **New project**, with the phone's colours.
-- **Delete** is a soft delete of the task and its sub-tasks, and it reaches the phone.
-- **CSV export** of top-level tasks with their sub-tasks, with spreadsheet formula protection.
+It follows the phone's Tasks tab and the Nindo design system (`docs/replicate/03-design-system.md`, tokens from `lib/app/theme/`). The audit behind this is in `docs/parity-audit-2026-10-29.md`.
+
+- **Sign in:** with the code from the email, or the email's sign-in link. The site URL must be in Supabase Auth → Redirect URLs. The desktop never creates accounts (`shouldCreateUser: false`). "Send code" waits 60 seconds between requests. The signed-in email is shown at the bottom of the sidebar.
+- **Lists:** All tasks, Today (due today or running between start and due), Overdue, Inbox, and one list per project, with open counts.
+- **Summary strip:** Open, In progress, Overdue and Done this week, as on the phone.
+- **Daily planning:** today's Daily planning task (made by the phone) with Start and Finish. The phone's timer and Insights minutes are not started from here.
+- **Quick add:** type and press Enter; the sliders button opens the full New task panel with what was typed.
+- **List view:** sections by status in board order (Backlog, To do, In progress, Done, Cancelled; Done and Cancelled start collapsed), tasks grouped by project inside each status (Inbox last) unless one list is picked. Rows are ruled, with the status circle, critical flame, priority bars, estimate, project, due date (red when overdue), sub-task count and up to three labels.
+- **Board view:** a column per status. Drag a card onto a column, or onto another card to land just before it; + adds a task straight into a column.
+- **Filter and sort:** priorities, labels, due (overdue, today, next 7 days, no date), show done and cancelled; sort by my order, due date, priority or last changed (open critical tasks first except in my order). Search matches every word.
+- **Status circle:** to do → in progress → done → to do.
+- **Task details:** every field the phone has, plus sub-tasks (add, tick, delete), links (add, remove) and the activity log with comments. Changes are recorded in the history the same way the phone records them. **Duplicate** copies the task with its sub-tasks and links, as to do. **Delete** is a soft delete of the task and its sub-tasks with **Undo** in the toast.
+- **Today's highlights:** what got done (or worked on, or dropped) today, the major tasks first, with its own filter. Minutes worked come from today's focus and time lines in each task's history.
+- **Settings:** Appearance (System, Light, Dark), App colors (the phone's six and a custom colour kept at AA contrast), Background (White, Paper, Mist, Sky, Mint, Blush or custom; light mode only) and Numerals (123 or १२३). They are kept on this computer.
+- **Keys:** N adds a task, / searches, Escape closes the task.
+- **New project**, with the phone's colours, and **CSV export** with spreadsheet formula protection.
 - The list refreshes when the window gets focus and with Refresh.
 
 ## How saving works ("last write wins")
@@ -64,11 +71,13 @@ Every save:
 - **Whole-task conflicts.** The desktop never overwrites a phone edit it hasn't seen. The phone, though, keeps whichever edit is later by `updated_at_ms`. If you edit a task offline on the phone after editing it on the desktop, the phone's version replaces the desktop's when it syncs.
 - **Not instant.** The phone pulls when the app opens or resumes, shortly after a local change, after sign-in, or on "Sync now".
 - **Each device uses its own clock** for `updated_at_ms`.
-- **Phone-only:** files and photos, timers and focus or time sessions, breaks, attendance and daily-planning settings are not shown here. A task finished on the desktop doesn't stop a timer running for it on the phone until you open that task there.
-- **Board drag and reordering** are phone-only for now. New desktop tasks go to the end of their status.
+- **Phone-only:** files and photos, timers and focus or time sessions, breaks, attendance, week insights and daily-planning settings are not synced, so they are not shown here. A task finished on the desktop doesn't stop a timer running for it on the phone until you open that task there.
+- **Dates are AD only.** The phone can show BS first; that needs its verified BS tables ported here.
+- **English only.** The phone's Nepali text is not here yet; Numerals १२३ works.
 
 ## Tests
 
 - `tests/` unit tests use `tests/fakeStore.ts`, an in-memory copy of the server rules (owner-only rows, revision on every write, stale writes ignored).
-- `e2e/smoke.spec.ts` runs the built app with its CSP against `e2e/mockSupabase.ts`. It covers code and link sign-in, the grouped list, all details, an edit, sub-tasks, links, comments, a phone edit causing a conflict, the status circle, creating in a project, and delete.
+- `e2e/smoke.spec.ts` runs the built app with its CSP against `e2e/mockSupabase.ts`. It covers code and link sign-in, the grouped list, all details, an edit, sub-tasks, links, comments, a phone edit causing a conflict, the status circle, creating in a project, delete and Undo, duplicate, quick add, a board drag, the filter, and settings that stay after a reload.
+- `SCREENS=1 npx playwright test screens` saves light and dark screenshots of every screen to `test-results/screens/` for design reviews.
 - The phone side is covered by `test/planner_sync_test.dart` in the Flutter app.

@@ -49,6 +49,7 @@ export class SupabaseStore implements Store {
     let request = this.client.from(table).select('*');
     if (!query.includeDeleted) request = request.is('deleted_at_ms', null);
     for (const [column, value] of Object.entries(query.eq ?? {})) request = request.eq(column, value);
+    if (query.since) request = request.gte(query.since.column, query.since.value);
     const { data, error } = await request.order('id').range(query.from, query.to);
     if (error) throw friendly(error);
     return (data ?? []) as Row[];
