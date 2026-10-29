@@ -72,7 +72,7 @@ function seed(server: MockSupabase) {
 
 async function signIn(page: Page, server: MockSupabase) {
   await page.goto('/');
-  await page.getByLabel('Email').fill(server.email);
+  await page.getByLabel('Email', { exact: true }).fill(server.email);
   await page.getByRole('button', { name: 'Send code' }).click();
   await page.getByLabel('Code').fill('123456');
   await page.getByRole('button', { name: 'Sign in' }).click();

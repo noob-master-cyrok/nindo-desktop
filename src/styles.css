@@ -2656,3 +2656,18 @@ button.blk:hover {
 .day-check .small-button {
   white-space: nowrap;
 }
+.self-start {
+  align-self: flex-start;
+  padding-left: 0;
+}
+.link-sign-in {
+  border-top: 1px solid var(--rule);
+  padding-top: 16px;
+}
+.link-sign-in .small {
+  margin: -8px 0 0;
+}
+.handoff {
+  gap: 4px;
+  align-items: flex-start;
+}

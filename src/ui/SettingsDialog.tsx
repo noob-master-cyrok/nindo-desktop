@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react';
+import type { Session } from '@supabase/supabase-js';
 import { useSettings } from '../settings';
+import { forgetSignInHere, handoffLink, inInstalledApp, supabase } from '../supabase';
 import { accentById, accents, backgroundById, backgrounds, customPrefix, isDarkFor, type Mode, type Numerals } from '../theme';
 import { Modal } from './Modal';
 import { Segmented } from './Segmented';
@@ -10,6 +13,20 @@ export function SettingsDialog({ email, onSignOut, onClose }: { email: string; o
   const customAccent = settings.accent.startsWith(customPrefix);
   const customBackground = settings.background.startsWith(customPrefix);
   const dark = isDarkFor(settings.mode);
+  // Read ahead so the copy runs straight from the click, as Safari requires.
+  const [session, setSession] = useState<Session | null>(null);
+  const [handoffError, setHandoffError] = useState<string | null>(null);
+  useEffect(() => {
+    void supabase?.auth.getSession().then(({ data }) => setSession(data.session));
+  }, []);
+
+  function moveToMacApp() {
+    if (!supabase || !session) return;
+    navigator.clipboard.writeText(handoffLink(session)).then(
+      () => forgetSignInHere(supabase!),
+      () => setHandoffError('Nindo could not copy to the clipboard. Try again.'),
+    );
+  }
 
   return (
     <Modal title="Settings" onClose={onClose}>
@@ -109,6 +126,22 @@ export function SettingsDialog({ email, onSignOut, onClose }: { email: string; o
               Sign out
             </button>
           </div>
+          {!inInstalledApp() && session && (
+            <div className="stack handoff">
+              <button className="secondary" onClick={moveToMacApp}>
+                Move sign-in to the Mac app
+              </button>
+              <p className="muted small">
+                Copies this sign-in and signs out this browser window. Open Nindo from the Dock and paste it into “Or
+                paste the link from the email”. One window at a time can hold a sign-in.
+              </p>
+              {handoffError && (
+                <p className="error" role="alert">
+                  {handoffError}
+                </p>
+              )}
+            </div>
+          )}
           <p className="muted small">These settings are kept on this computer. Your phone keeps its own.</p>
         </section>
 

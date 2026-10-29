@@ -70,14 +70,14 @@ test('sign in and work through the Tasks screen', async ({ page }) => {
   await page.clock.install();
   // Sign in with an email code.
   await page.goto('/');
-  await page.getByLabel('Email').fill(server.email);
+  await page.getByLabel('Email', { exact: true }).fill(server.email);
   await page.getByRole('button', { name: 'Send code' }).click();
   await expect(page.getByText(`We sent an email to ${server.email}`)).toBeVisible();
   await page.getByLabel('Code').fill('000000');
-  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('That code did not work');
   await page.getByLabel('Code').fill('123456');
-  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByLabel('Signed in account')).toContainText(server.email);
 
   // Grouped by status; sub-tasks stay inside their task.
@@ -236,6 +236,56 @@ test('an emailed sign-in link signs in and is cleared from the address bar', asy
   await expect(page.getByLabel('Signed in account')).toContainText(server.email);
   await expect(page.getByRole('region', { name: 'In progress' })).toContainText('Prepare client deck');
   expect(page.url()).not.toContain('access_token');
+});
+
+test('the emailed link can be pasted in, even after the email limit is hit', async ({ page }) => {
+  const server = new MockSupabase(ORIGIN);
+  seed(server);
+  server.otpStatus = 429;
+  await server.install(page);
+  await page.goto('/');
+  await page.getByLabel('Email', { exact: true }).fill(server.email);
+  await page.getByRole('button', { name: 'Send code' }).click();
+  await expect(page.getByRole('alert')).toContainText('only sends a few emails an hour');
+  await expect(page.getByLabel('Code')).toBeVisible();
+  const paste = page.getByLabel('Or paste the link from the email');
+  await paste.fill('not a link');
+  await page.getByRole('button', { name: 'Sign in with link' }).click();
+  await expect(page.getByRole('alert')).toContainText('not a Nindo sign-in link');
+  await paste.fill(`${ORIGIN}/auth/v1/verify?token=usedhash&type=magiclink&redirect_to=x`);
+  await page.getByRole('button', { name: 'Sign in with link' }).click();
+  await expect(page.getByRole('alert')).toContainText('already have been opened');
+  await paste.fill(`${ORIGIN}/auth/v1/verify?token=goodhash&type=magiclink&redirect_to=x`);
+  await page.getByRole('button', { name: 'Sign in with link' }).click();
+  await expect(page.getByLabel('Signed in account')).toContainText(server.email);
+});
+
+test('a code from an earlier email works without sending a new one', async ({ page }) => {
+  const server = new MockSupabase(ORIGIN);
+  seed(server);
+  await server.install(page);
+  await page.goto('/');
+  await page.getByLabel('Email', { exact: true }).fill(server.email);
+  await page.getByRole('button', { name: 'I already have a code' }).click();
+  await page.getByLabel('Code').fill('123 456');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByLabel('Signed in account')).toContainText(server.email);
+});
+
+test('the sign-in moves from the browser to the Dock app by paste', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const server = new MockSupabase(ORIGIN);
+  seed(server);
+  await server.install(page);
+  await signIn(page, server);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'Move sign-in to the Mac app' }).click();
+  await expect(page.getByLabel('Email', { exact: true })).toBeVisible();
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied).toContain('refresh_token=');
+  await page.getByLabel('Or paste the link from the email').fill(copied);
+  await page.getByRole('button', { name: 'Sign in with link' }).click();
+  await expect(page.getByLabel('Signed in account')).toContainText(server.email);
 });
 
 test('an expired sign-in link explains what to do', async ({ page }) => {

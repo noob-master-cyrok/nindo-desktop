@@ -8,6 +8,7 @@ import type { Page, Route } from '@playwright/test';
 export class MockSupabase {
   readonly userId = '11111111-1111-4111-8111-111111111111';
   readonly email = 'tester@example.test';
+  otpStatus = 200;
   readonly tables: Record<string, Map<string, Record<string, unknown>>> = {
     planner_projects: new Map(),
     planner_tasks: new Map(),
@@ -85,10 +86,13 @@ export class MockSupabase {
     const method = request.method();
     if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' } });
 
-    if (url.pathname === '/auth/v1/otp') return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    if (url.pathname === '/auth/v1/otp') {
+      const body = this.otpStatus === 200 ? '{}' : JSON.stringify({ code: this.otpStatus, error_code: 'over_email_send_rate_limit', msg: 'email rate limit exceeded' });
+      return route.fulfill({ status: this.otpStatus, contentType: 'application/json', body });
+    }
     if (url.pathname === '/auth/v1/verify') {
-      const body = request.postDataJSON() as { token: string };
-      if (body.token !== '123456') {
+      const body = request.postDataJSON() as { token?: string; token_hash?: string };
+      if (body.token !== '123456' && body.token_hash !== 'goodhash') {
         return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ code: 403, error_code: 'otp_expired', msg: 'Token has expired or is invalid' }) });
       }
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(this.session()) });
