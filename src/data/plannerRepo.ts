@@ -276,6 +276,7 @@ export class PlannerRepo {
   async saveAttendance(
     day: string,
     values: { check_in_ms: number | null; check_out_ms: number | null; note: string },
+    edited = true,
   ): Promise<SaveResult<AttendanceDay>> {
     if (values.note.length > 2000) return { status: 'invalid', problems: ['The note is too long.'] };
     const now = this.now();
@@ -284,7 +285,7 @@ export class PlannerRepo {
       return this.insert<AttendanceDay>('planner_attendance', {
         id: day,
         ...values,
-        edited: true,
+        edited,
         created_at_ms: now,
         updated_at_ms: now,
         deleted_at_ms: null,
@@ -292,11 +293,83 @@ export class PlannerRepo {
     }
     if (existing.deleted_at_ms != null) {
       // A day removed on the phone comes back with these values.
-      const patch = buildPatch(existing as unknown as Record<string, unknown>, { ...values, edited: true, deleted_at_ms: null }, now);
+      const patch = buildPatch(existing as unknown as Record<string, unknown>, { ...values, edited, deleted_at_ms: null }, now);
       const saved = await this.store.updateIfRevision('planner_attendance', day, existing.revision, patch);
       return saved ? { status: 'saved', row: saved as unknown as AttendanceDay } : { status: 'gone' };
     }
-    return casUpdate<AttendanceDay>(this.store, 'planner_attendance', day, existing.revision, { ...values, edited: true, deleted_at_ms: null }, now);
+    return casUpdate<AttendanceDay>(this.store, 'planner_attendance', day, existing.revision, { ...values, edited: edited || existing.edited, deleted_at_ms: null }, now);
+  }
+
+  /// Records [minutes] worked on a task, as the phone's `logTime`: a time
+  /// session (kind `focus` for timers and focus rounds, `manual` when added
+  /// by hand), a history line, and a to-do moves to in progress.
+  async logTime(task: PlannerTask, minutes: number, startedAtMs: number, kind: 'focus' | 'manual' = 'focus'): Promise<SaveResult<Session>> {
+    const whole = Math.floor(minutes);
+    if (whole <= 0) return { status: 'invalid', problems: ['Log at least one minute.'] };
+    if (whole > 24 * 60) return { status: 'invalid', problems: ['That is more than a day.'] };
+    const now = this.now();
+    const result = await this.insert<Session>('planner_sessions', {
+      id: this.uuid(),
+      task_id: task.id,
+      kind,
+      started_at_ms: Math.round(startedAtMs),
+      minutes: whole,
+      created_at_ms: now,
+      updated_at_ms: now,
+      deleted_at_ms: null,
+    });
+    if (result.status !== 'saved') return result;
+    await this.log(task.id, kind === 'focus' ? 'focus' : 'time', String(whole));
+    if (task.status === 'todo' || task.status === 'backlog') {
+      const fresh = await this.get(task.id);
+      if (fresh) await this.setStatus(fresh, 'doing');
+    }
+    return result;
+  }
+
+  /// A task's time log, oldest first.
+  async sessionsFor(taskId: string): Promise<Session[]> {
+    const rows = (await this.store.list('planner_sessions', { eq: { task_id: taskId }, from: 0, to: 999 })) as unknown as Session[];
+    return rows.sort((a, b) => a.started_at_ms - b.started_at_ms);
+  }
+
+  /// Removes a logged session (a tombstone, so the phone removes it too).
+  removeSession(session: Session): Promise<SaveResult<Session>> {
+    return casUpdate<Session>(this.store, 'planner_sessions', session.id, session.revision, { deleted_at_ms: this.now() }, this.now());
+  }
+
+  /// Records a break that ran from [startedAtMs] to [endedAtMs], making the
+  /// break itself the first time (ids match the phone's: run = break@start).
+  async recordBreak(breakId: string, title: string, startedAtMs: number, endedAtMs: number): Promise<SaveResult<BreakRun>> {
+    if (endedAtMs <= startedAtMs) return { status: 'invalid', problems: ['The break has not started yet.'] };
+    const now = this.now();
+    const existing = await this.store.fetchById('planner_breaks', breakId);
+    if (!existing) {
+      const made = await this.insert<Break>('planner_breaks', {
+        id: breakId,
+        title: title.trim() || 'Break',
+        description: '',
+        created_at_ms: Math.round(startedAtMs),
+        updated_at_ms: now,
+        deleted_at_ms: null,
+      });
+      if (made.status !== 'saved') return made as SaveResult<BreakRun>;
+    }
+    return this.insert<BreakRun>('planner_break_runs', {
+      id: `${breakId}@${Math.round(startedAtMs)}`,
+      break_id: breakId,
+      started_at_ms: Math.round(startedAtMs),
+      ended_at_ms: Math.round(endedAtMs),
+      updated_at_ms: now,
+      deleted_at_ms: null,
+    });
+  }
+
+  /// Checks in (or out) for [day] now, once each a day as on the phone.
+  async checkInOut(day: string, current: AttendanceDay | undefined, at: number): Promise<SaveResult<AttendanceDay> | { status: 'already' }> {
+    if (!current?.check_in_ms) return this.saveAttendance(day, { check_in_ms: at, check_out_ms: null, note: current?.note ?? '' }, false);
+    if (current.check_out_ms) return { status: 'already' };
+    return this.saveAttendance(day, { check_in_ms: current.check_in_ms, check_out_ms: at, note: current.note }, false);
   }
 
   async createProject(name: string, color: number, existing: Project[]): Promise<SaveResult<Project>> {

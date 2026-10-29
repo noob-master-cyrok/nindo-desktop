@@ -150,6 +150,39 @@ export const Sparkles = (p: P) => (
   </Svg>
 );
 
+export const Play = (p: P) => (
+  <Svg {...p}>
+    <path d="M8 5.5v13l10.5-6.5z" fill="currentColor" />
+  </Svg>
+);
+export const Pause = (p: P) => (
+  <Svg {...p}>
+    <rect x="7" y="5.5" width="3.4" height="13" rx="1" fill="currentColor" stroke="none" />
+    <rect x="13.6" y="5.5" width="3.4" height="13" rx="1" fill="currentColor" stroke="none" />
+  </Svg>
+);
+export const Stop = (p: P) => (
+  <Svg {...p}>
+    <rect x="6.5" y="6.5" width="11" height="11" rx="2.5" fill="currentColor" stroke="none" />
+  </Svg>
+);
+export const Leaf = (p: P) => (
+  <Svg {...p}>
+    <path d="M5 19c0-8 5-13.5 14-14-.3 9-6 14-14 14z" />
+    <path d="M5 19l7.5-7.5" />
+  </Svg>
+);
+export const Expand = (p: P) => (
+  <Svg {...p}>
+    <path d="M4.5 9.5v-5h5M19.5 9.5v-5h-5M4.5 14.5v5h5M19.5 14.5v5h-5" />
+  </Svg>
+);
+export const Check = (p: P) => (
+  <Svg {...p}>
+    <path d="M5 12.5l4.5 4.5L19 7.5" />
+  </Svg>
+);
+
 /// The phone's status circle icons.
 export function StatusIcon({ status, size = 22 }: { status: Status; size?: number }) {
   return (

@@ -70,16 +70,17 @@ export function AttendanceCard({
   data,
   today,
   onSave,
+  onCheck,
 }: {
   data: TimeData;
   today: string;
   onSave: (day: string, values: { check_in_ms: number | null; check_out_ms: number | null; note: string }) => Promise<string | null>;
+  onCheck: () => void;
 }) {
   const { num } = useSettings();
   const [editing, setEditing] = useState<string | null>(null);
   const day = data.attendance.find((a) => a.id === today);
   const recent = [...data.attendance].sort((a, b) => b.id.localeCompare(a.id));
-  if (!data.attendance.length) return null;
 
   const status = day?.check_in_ms
     ? day.check_out_ms
@@ -95,9 +96,16 @@ export function AttendanceCard({
           <h2 className="card-title">Attendance</h2>
           <p className="muted small">{status}</p>
         </div>
-        <button className="secondary push" onClick={() => setEditing(today)}>
-          Edit today
-        </button>
+        <div className="row push">
+          {!day?.check_out_ms && (
+            <button className={day?.check_in_ms ? 'secondary' : 'primary'} onClick={onCheck}>
+              {day?.check_in_ms ? 'Check out' : 'Check in'}
+            </button>
+          )}
+          <button className="text" onClick={() => setEditing(today)}>
+            Edit today
+          </button>
+        </div>
       </header>
       <ul className="ruled">
         {recent.slice(0, 5).map((a) => (

@@ -67,6 +67,7 @@ test('sign in and work through the Tasks screen', async ({ page }) => {
     if (m.type() === 'error' && /Content Security Policy/i.test(m.text())) cspErrors.push(m.text());
   });
 
+  await page.clock.install();
   // Sign in with an email code.
   await page.goto('/');
   await page.getByLabel('Email').fill(server.email);
@@ -87,17 +88,19 @@ test('sign in and work through the Tasks screen', async ({ page }) => {
   await page.screenshot({ path: 'test-results/list.png', fullPage: true });
 
   // All the details.
-  await page.getByRole('button', { name: /Prepare client deck/ }).last().click();
-  await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Prepare client deck');
-  await expect(page.getByRole('combobox', { name: 'Project' })).toHaveValue(PROJECT_ID);
-  await expect(page.getByLabel('Labels (comma separated)')).toHaveValue('client, slides');
+  await page.getByRole('button', { name: /^Prepare client deck/ }).click();
+  await expect(page.getByRole('textbox', { name: 'Title', exact: true })).toHaveValue('Prepare client deck');
+  await expect(page.getByRole('button', { name: 'Project Work' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Remove label client' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Remove label slides' })).toBeVisible();
   await expect(page.getByLabel('Estimate (minutes)')).toHaveValue('90');
   await expect(page.getByRole('region', { name: 'Sub-tasks' })).toContainText('Collect numbers');
   await expect(page.getByRole('region', { name: 'Activity' })).toContainText('Ask Maya for the charts');
 
   // Edit.
   await page.getByLabel('Description').fill('Slides for Friday, 10 pages');
-  await page.getByRole('combobox', { name: 'Priority' }).selectOption({ label: 'Urgent' });
+  await page.getByRole('button', { name: 'Priority High' }).click();
+  await page.getByRole('option', { name: 'Urgent' }).click();
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('status')).toContainText('Saved.');
   expect(server.tables.planner_tasks!.get(TASK_ID)).toMatchObject({
@@ -140,7 +143,7 @@ test('sign in and work through the Tasks screen', async ({ page }) => {
   // Create in a project.
   await page.getByRole('button', { name: /^Work/ }).click();
   await page.getByRole('button', { name: 'New task' }).click();
-  await page.getByLabel('Title', { exact: true }).fill('Book venue');
+  await page.getByRole('textbox', { name: 'Title', exact: true }).fill('Book venue');
   await page.getByRole('button', { name: 'Add task' }).click();
   await expect(page.getByRole('status')).toContainText('Task added.');
   const created = [...server.tables.planner_tasks!.values()].find((r) => r.title === 'Book venue')!;
@@ -156,7 +159,7 @@ test('sign in and work through the Tasks screen', async ({ page }) => {
 
   // Duplicate.
   await page.getByRole('button', { name: 'Duplicate' }).click();
-  await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Book venue (copy)');
+  await expect(page.getByRole('textbox', { name: 'Title', exact: true })).toHaveValue('Book venue (copy)');
 
   // Quick add, then drag it on the board to In progress.
   await page.getByRole('button', { name: /^All tasks/ }).click();
@@ -189,6 +192,25 @@ test('sign in and work through the Tasks screen', async ({ page }) => {
   const day = [...server.tables.planner_attendance!.values()][0]!;
   expect(day).toMatchObject({ edited: true });
   expect(new Date(day.check_out_ms as number).getHours()).toBe(17);
+
+  // Timer: start on a row, pause after three minutes; the time is logged.
+  await page.clock.fastForward(0);
+  await page.getByRole('button', { name: 'Start timer: Call the printer' }).click();
+  await expect(page.getByRole('status', { name: 'Running timers' })).toBeVisible();
+  await page.clock.fastForward('03:05');
+  await page.getByRole('button', { name: 'Pause timer: Call the printer' }).click();
+  await expect.poll(() => [...server.tables.planner_sessions!.values()].filter((r) => r.task_id === printer.id).map((r) => r.minutes)).toEqual([3]);
+
+  // A break pauses timers and covers the page until it ends.
+  await page.getByRole('button', { name: 'Start timer: Call the printer' }).click();
+  await page.getByRole('button', { name: /Take a break/ }).click();
+  await expect(page.getByRole('dialog', { name: 'On a break' })).toBeVisible();
+  await page.getByLabel('What is this break?').fill('Tea');
+  await page.clock.fastForward('10:00');
+  await page.getByRole('button', { name: 'End break' }).click();
+  await expect(page.getByRole('dialog', { name: 'On a break' })).toHaveCount(0);
+  await expect.poll(() => [...server.tables.planner_breaks!.values()].map((r) => r.title)).toEqual(['Tea']);
+  await expect.poll(() => server.tables.planner_break_runs!.size).toBe(1);
 
   // Settings: App colors and dark mode stay after a reload.
   await page.getByRole('button', { name: 'Settings' }).click();

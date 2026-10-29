@@ -1,6 +1,6 @@
 import { decodeLabels, durationLabel, isClosed, isOverdue, priorityLabels, statusLabels, type PlannerTask, type Project } from '../domain/planner';
 import { useSettings } from '../settings';
-import { Calendar, Flame, Indent, PriorityIcon, StatusIcon, Timer } from './Icons';
+import { Calendar, Flame, Indent, Pause, Play, PriorityIcon, StatusIcon, Timer } from './Icons';
 
 /// "29 Oct", or "Today".
 export function shortDate(iso: string, today: string, num: (v: string) => string): string {
@@ -23,6 +23,8 @@ export function TaskTile({
   card = false,
   onOpen,
   onCycle,
+  run,
+  onToggleTimer,
 }: {
   task: PlannerTask;
   /// Left out under a project heading, where it would repeat.
@@ -33,6 +35,9 @@ export function TaskTile({
   card?: boolean;
   onOpen: () => void;
   onCycle: () => void;
+  /// The task's timer or focus round: live text while it runs.
+  run?: { running: boolean; text: string | null };
+  onToggleTimer?: () => void;
 }) {
   const { num } = useSettings();
   const t = task;
@@ -40,8 +45,14 @@ export function TaskTile({
   const overdue = isOverdue(t, today);
   const labels = decodeLabels(t.labels);
   const doneSubs = subtasks.filter((s) => isClosed(s.status)).length;
+  const live = !closed && run?.running;
   const meta = (
     <>
+      {run?.text && !closed && (
+        <span className={live ? 'run-pill on' : 'run-pill'}>
+          <Timer size={11} /> {live ? 'Running' : 'Paused'} {num(run.text)}
+        </span>
+      )}
       {t.critical && !closed && (
         <span className="crit">
           <Flame size={11} /> Critical
@@ -84,7 +95,7 @@ export function TaskTile({
   );
 
   return (
-    <div className={['tile', card ? 'card-tile' : 'row-tile', selected ? 'selected' : ''].join(' ')}>
+    <div className={['tile', card ? 'card-tile' : 'row-tile', selected ? 'selected' : '', live ? 'live' : ''].join(' ')}>
       <button
         type="button"
         className={`status s-${t.status}`}
@@ -98,6 +109,17 @@ export function TaskTile({
         <span className={closed ? 'tile-title closed' : 'tile-title'}>{t.title}</span>
         <span className="tile-meta">{meta}</span>
       </button>
+      {onToggleTimer && !closed && (
+        <button
+          type="button"
+          className={live ? 'tile-timer on' : 'tile-timer'}
+          aria-label={live ? `Pause timer: ${t.title}` : `Start timer: ${t.title}`}
+          title={live ? 'Pause timer' : 'Start timer'}
+          onClick={onToggleTimer}
+        >
+          {live ? <Pause size={14} /> : <Play size={14} />}
+        </button>
+      )}
     </div>
   );
 }

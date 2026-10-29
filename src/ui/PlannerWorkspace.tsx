@@ -28,13 +28,16 @@ import { Board } from './Board';
 import { DailyPlanningCard, Highlights, Summary } from './Cards';
 import { AttendanceCard, BreaksCard, WeekInsights } from './TimeCards';
 import { FilterDialog } from './FilterDialog';
-import { BoardIcon, Chevron, Close, Download, FilterIcon, Gear, ListIcon, Plus, Refresh, Search, Sliders, StatusIcon } from './Icons';
+import { BoardIcon, Chevron, Close, Download, Expand, FilterIcon, Gear, Leaf, ListIcon, Pause, Plus, Refresh, Search, Sliders, StatusIcon } from './Icons';
 import { Modal } from './Modal';
 import { Segmented } from './Segmented';
 import { SettingsDialog } from './SettingsDialog';
 import { TaskPanel } from './TaskPanel';
 import { TaskTile } from './TaskTile';
 import { Toast, type ToastMessage } from './Toast';
+import { BreakCover, FullClock } from './Clocks';
+import { useTimers } from './useTimers';
+import { clockText, runningTimers, timerElapsed } from '../domain/clock';
 
 /// The phone's status-circle tap: to do → in progress → done → to do.
 export function nextStatus(status: Status): Status {
@@ -75,6 +78,7 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
   const [newProject, setNewProject] = useState<{ name: string; color: number } | null>(null);
   const [dialog, setDialog] = useState<'filter' | 'settings' | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [fullClock, setFullClock] = useState(false);
   const quickRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -128,6 +132,15 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
 
   const today = localIsoDate(new Date());
   const all = useMemo(() => tasks ?? [], [tasks]);
+  const timers = useTimers({ planner, tasks: all, onLogged: load, say });
+  const liveIds = runningTimers(timers.state);
+  const runOf = (t: PlannerTask) => {
+    const f = timers.state.focus;
+    if (f && f.taskId === t.id && f.phase === 'focus') return { running: true, text: clockText(f.endsAt - timers.now) };
+    const timer = timers.state.timers[t.id];
+    if (!timer) return undefined;
+    return { running: timer.startedAt != null, text: clockText(timerElapsed(timer, timers.now)) };
+  };
   const shown = useMemo(() => sortTasks(visibleTasks(all, scope, search, today, filter), sort), [all, scope, search, today, filter, sort]);
   const byStatus = useMemo(() => {
     const out = {} as Record<Status, PlannerTask[]>;
@@ -250,6 +263,8 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
       selected={t.id === selected}
       onOpen={() => open(t.id)}
       onCycle={() => cycle(t)}
+      run={runOf(t)}
+      onToggleTimer={() => timers.toggle(t)}
     />
   );
 
@@ -352,6 +367,26 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
         </header>
 
         <Summary {...counts} />
+        {(liveIds.length > 0 || timers.state.focus) && (
+          <div className="running-bar" role="status" aria-label="Running timers">
+            <span className="pulse" aria-hidden="true" />
+            <span className="running-text">
+              {timers.state.focus
+                ? `${timers.state.focus.phase === 'focus' ? 'Focus' : 'Rest'} · ${num(clockText(timers.state.focus.endsAt - timers.now))} · ${timers.state.focus.title}`
+                : liveIds.length === 1
+                  ? `${num(clockText(timerElapsed(timers.state.timers[liveIds[0]!], timers.now)))} · ${all.find((t) => t.id === liveIds[0])?.title ?? 'Task'}`
+                  : `${num(liveIds.length)} timers running`}
+            </span>
+            <button className="icon-button small push" aria-label="Full screen" title="Full screen" onClick={() => setFullClock(true)}>
+              <Expand size={16} />
+            </button>
+            {liveIds.length > 0 && (
+              <button className="secondary small-button" onClick={timers.pauseAll}>
+                <Pause size={14} /> Pause {liveIds.length > 1 ? 'all' : ''}
+              </button>
+            )}
+          </div>
+        )}
         <DailyPlanningCard
           tasks={all}
           activity={activity}
@@ -399,6 +434,9 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
               <Sliders className="acc-ink" />
             </button>
           </form>
+          <button className="break-button" onClick={timers.takeBreak} title="Take a break: pauses your timers">
+            <Leaf size={18} /> Take a break
+          </button>
           <label className="field-pill search">
             <Search size={16} className="muted" />
             <input ref={searchRef} type="search" aria-label="Search tasks" placeholder="Search tasks" value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -459,16 +497,16 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
                         <div key={g.projectId ?? 'inbox'}>
                           {groupHeader(g.projectId, g.tasks.length)}
                           <ul className="ruled">
-                            {g.tasks.map((t) => (
-                              <li key={t.id}>{tile(t, true)}</li>
+                            {g.tasks.map((t, i) => (
+                              <li key={t.id} style={{ ['--i' as string]: i }}>{tile(t, true)}</li>
                             ))}
                           </ul>
                         </div>
                       ))
                     ) : (
                       <ul className="ruled">
-                        {items.map((t) => (
-                          <li key={t.id}>{tile(t, false)}</li>
+                        {items.map((t, i) => (
+                          <li key={t.id} style={{ ['--i' as string]: i }}>{tile(t, false)}</li>
                         ))}
                       </ul>
                     ))}
@@ -498,6 +536,14 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
           <AttendanceCard
             data={time}
             today={today}
+            onCheck={async () => {
+              const day = time.attendance.find((a) => a.id === today);
+              const result = await guarded(() => planner.checkInOut(today, day, Date.now()));
+              if (result?.status === 'saved') {
+                say(day?.check_in_ms ? 'Checked out. See you tomorrow.' : 'Checked in. Have a good day.');
+                await load();
+              } else if (result?.status === 'already') say('You already checked out today.');
+            }}
             onSave={async (day, values) => {
               const result = await guarded(() => planner.saveAttendance(day, values));
               if (result?.status === 'saved') {
@@ -513,7 +559,7 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
         {time && <WeekInsights data={time} today={today} />}
 
         <p className="muted small foot-note">
-          Changes reach your phone the next time it opens or syncs. Timers, breaks, attendance, files and photos stay on your phone.
+          Changes reach your phone the next time it opens or syncs. Timers run on this computer; the time they log syncs. Files and photos stay on your phone.
         </p>
       </main>
 
@@ -544,6 +590,9 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
               setSelected(null);
             }}
             onClose={() => setSelected(null)}
+            timers={timers}
+            onFullScreen={() => setFullClock(true)}
+            onTimeChanged={load}
           />
         )}
       </aside>
@@ -614,6 +663,8 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
         </Modal>
       )}
 
+      <BreakCover timers={timers} />
+      {fullClock && <FullClock timers={timers} tasks={all} onClose={() => setFullClock(false)} />}
       <Toast toast={toast} onDone={hideToast} />
     </div>
   );

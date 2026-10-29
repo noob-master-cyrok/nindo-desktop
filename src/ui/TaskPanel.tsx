@@ -9,6 +9,7 @@ import {
   priorityLabels,
   sortTasks,
   statusChange,
+  statuses,
   statusLabels,
   type Activity,
   type Link,
@@ -18,7 +19,10 @@ import {
   type TaskEdit,
 } from '../domain/planner';
 import { ConflictDialog } from './ConflictDialog';
-import { Close, Copy, LinkIcon, Trash } from './Icons';
+import { Close, Copy, LinkIcon, PriorityIcon, StatusIcon, Trash } from './Icons';
+import { Picker } from './Picker';
+import { TimePanel } from './TimePanel';
+import type { Timers } from './useTimers';
 
 interface Form {
   title: string;
@@ -66,6 +70,52 @@ function toEdit(form: Form): Omit<TaskEdit, 'completed_at_ms'> | string {
   };
 }
 
+/// Grows a text box to fit what is typed.
+function grow(el: HTMLTextAreaElement | null) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight + 2}px`;
+}
+
+/// Labels as chips, like the phone: Enter or a comma adds one, × removes it.
+function LabelsField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [draft, setDraft] = useState('');
+  const labels = value.split(',').map((l) => l.trim()).filter(Boolean);
+  const add = () => {
+    const l = draft.trim().replace(/,/g, ' ');
+    if (l && !labels.includes(l)) onChange([...labels, l].join(', '));
+    setDraft('');
+  };
+  return (
+    <div className="field">
+      <span id="labels-label">Labels</span>
+      <div className="label-field">
+        {labels.map((l) => (
+          <span key={l} className="label-chip big">
+            {l}
+            <button type="button" className="chip-x" aria-label={`Remove label ${l}`} onClick={() => onChange(labels.filter((x) => x !== l).join(', '))}>
+              <Close size={11} />
+            </button>
+          </span>
+        ))}
+        <input
+          aria-labelledby="labels-label"
+          placeholder={labels.length ? 'Add' : 'Add a label'}
+          value={draft}
+          onChange={(e) => (e.target.value.endsWith(',') ? (setDraft(e.target.value.slice(0, -1)), setTimeout(add)) : setDraft(e.target.value))}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              add();
+            } else if (e.key === 'Backspace' && !draft && labels.length) onChange(labels.slice(0, -1).join(', '));
+          }}
+          onBlur={add}
+        />
+      </div>
+    </div>
+  );
+}
+
 function when(ms: number): string {
   return new Date(ms).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
 }
@@ -84,6 +134,9 @@ export function TaskPanel({
   onDeleted,
   onGone,
   onClose,
+  timers,
+  onFullScreen,
+  onTimeChanged,
 }: {
   task: PlannerTask | null;
   /// What was typed in quick add before opening the full window.
@@ -100,6 +153,9 @@ export function TaskPanel({
   onDeleted: (task: PlannerTask, subtasks: PlannerTask[]) => void;
   onGone: (id: string) => void;
   onClose: () => void;
+  timers: Timers;
+  onFullScreen: () => void;
+  onTimeChanged: () => void;
 }) {
   const [base, setBase] = useState(task);
   const [form, setForm] = useState(() => toForm(task, defaultProject, initialTitle));
@@ -137,6 +193,16 @@ export function TaskPanel({
     // Only when the panel opens; later loads follow saves.
     if (task) loadDetails(task.id);
   }, []);
+
+  // The task changed elsewhere (a timer moved it on, or the phone synced):
+  // take the new version while nothing here is unsaved.
+  useEffect(() => {
+    if (task && base && task.id === base.id && task.revision !== base.revision && !dirty) {
+      setBase(task);
+      setForm(toForm(task, null));
+      loadDetails(task.id);
+    }
+  }, [task?.revision]);
 
   function patch(fields: Partial<Form>) {
     setForm((f) => ({ ...f, ...fields }));
@@ -192,52 +258,69 @@ export function TaskPanel({
         </button>
       </header>
 
+      {base && (
+        <TimePanel task={task && task.id === base.id ? task : base} planner={planner} timers={timers} onFullScreen={onFullScreen} onToast={onToast} onChanged={onTimeChanged} />
+      )}
+
       <form onSubmit={save} className="stack">
         <fieldset disabled={busy} className="stack">
           <label className="field">
             <span>Title</span>
-            <input className="title-input" value={form.title} maxLength={300} required autoFocus={!base} onChange={(e) => patch({ title: e.target.value })} />
+            <textarea
+              className="title-input"
+              rows={1}
+              value={form.title}
+              maxLength={300}
+              required
+              autoFocus={!base}
+              ref={grow}
+              onChange={(e) => {
+                patch({ title: e.target.value.replace(/\n/g, ' ') });
+                grow(e.currentTarget);
+              }}
+              onKeyDown={(e) => {
+                // Enter saves, as in a one-line field.
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  e.currentTarget.form?.requestSubmit();
+                }
+              }}
+            />
           </label>
 
           <div className="grid2">
-            <label className="field">
-              <span>Status</span>
-              <select value={form.status} onChange={(e) => patch({ status: e.target.value as Status })}>
-                {(['backlog', 'todo', 'doing', 'done', 'cancelled'] as const).map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabels[s]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Priority</span>
-              <select value={form.priority} onChange={(e) => patch({ priority: Number(e.target.value) })}>
-                {priorityLabels.map((label, value) => (
-                  <option key={label} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <Picker<Status>
+              label="Status"
+              value={form.status}
+              options={statuses.map((v) => ({ value: v, label: statusLabels[v], icon: <span className={`s-${v}`}><StatusIcon status={v} size={18} /></span> }))}
+              onChange={(status) => patch({ status })}
+            />
+            <Picker<number>
+              label="Priority"
+              value={form.priority}
+              options={[4, 3, 2, 1, 0].map((v) => ({ value: v, label: priorityLabels[v]!, icon: <PriorityIcon priority={v} size={16} /> }))}
+              onChange={(priority) => patch({ priority })}
+            />
           </div>
 
           <div className="grid2">
+            <Picker<string>
+              label="Project"
+              value={form.project_id}
+              options={[
+                { value: '', label: 'Inbox', icon: <span className="dot hollow" /> },
+                ...projects
+                  .filter((p) => !p.archived || p.id === form.project_id)
+                  .map((p) => ({ value: p.id, label: p.archived ? `${p.name} (archived)` : p.name, icon: <span className="dot" data-color={p.color} /> })),
+              ]}
+              onChange={(project_id) => patch({ project_id })}
+            />
             <label className="field">
-              <span>Project</span>
-              <select value={form.project_id} onChange={(e) => patch({ project_id: e.target.value })}>
-                <option value="">Inbox</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                    {p.archived ? ' (archived)' : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Estimate (minutes)</span>
-              <input inputMode="numeric" value={form.estimate} onChange={(e) => patch({ estimate: e.target.value })} />
+              <span>Estimate</span>
+              <span className="suffix-field">
+                <input inputMode="numeric" aria-label="Estimate (minutes)" placeholder="None" value={form.estimate} onChange={(e) => patch({ estimate: e.target.value })} />
+                <span className="suffix muted">min</span>
+              </span>
             </label>
           </div>
 
@@ -252,10 +335,7 @@ export function TaskPanel({
             </label>
           </div>
 
-          <label className="field">
-            <span>Labels (comma separated)</span>
-            <input value={form.labels} onChange={(e) => patch({ labels: e.target.value })} />
-          </label>
+          <LabelsField value={form.labels} onChange={(labels) => patch({ labels })} />
 
           <label className="switch-row">
             <span>
@@ -268,7 +348,16 @@ export function TaskPanel({
 
           <label className="field">
             <span>Description</span>
-            <textarea rows={6} value={form.description} onChange={(e) => patch({ description: e.target.value })} />
+            <textarea
+              rows={4}
+              ref={grow}
+              placeholder="Write the details, steps, decisions…"
+              value={form.description}
+              onChange={(e) => {
+                patch({ description: e.target.value });
+                grow(e.currentTarget);
+              }}
+            />
           </label>
         </fieldset>
 

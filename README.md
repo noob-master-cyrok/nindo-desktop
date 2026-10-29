@@ -49,7 +49,12 @@ It follows the phone's Tasks tab and the Nindo design system (`docs/replicate/03
 - **Task details:** every field the phone has, plus sub-tasks (add, tick, delete), links (add, remove) and the activity log with comments. Changes are recorded in the history the same way the phone records them. **Duplicate** copies the task with its sub-tasks and links, as to do. **Delete** is a soft delete of the task and its sub-tasks with **Undo** in the toast.
 - **Today's highlights:** what got done (or worked on, or dropped) today, the major tasks first, with its own filter. Minutes worked come from today's focus and time lines in each task's history.
 - **Settings:** Appearance (System, Light, Dark), App colors (the phone's six and a custom colour kept at AA contrast), Background (White, Paper, Mist, Sky, Mint, Blush or custom; light mode only) and Numerals (123 or १२३). They are kept on this computer.
-- **Keys:** N adds a task, / searches, Escape closes the task.
+- **Timers:** start a timer on any row (several at once) or in the task panel; Pause logs whole minutes as a time session, the rest carries over. Focus rounds of 15, 25, 45 or 50 minutes end with a 5-minute rest. A full-screen black clock shows what runs. Timers keep running across reloads and tabs on this computer, and closing a task pauses its timer.
+- **Time log:** every session for a task (from here or the phone), add time by hand, remove one.
+- **Breaks:** Take a break pauses every timer and covers the page until End break; the break and its run sync to the phone.
+- **Attendance:** Check in and Check out once a day, or set any day by hand.
+- **This week:** worked, break and at-work hours per day.
+- **Keys:** N adds a task, / searches, Escape closes the task or the full-screen clock.
 - **New project**, with the phone's colours, and **CSV export** with spreadsheet formula protection.
 - The list refreshes when the window gets focus and with Refresh.
 
@@ -71,7 +76,7 @@ Every save:
 - **Whole-task conflicts.** The desktop never overwrites a phone edit it hasn't seen. The phone, though, keeps whichever edit is later by `updated_at_ms`. If you edit a task offline on the phone after editing it on the desktop, the phone's version replaces the desktop's when it syncs.
 - **Not instant.** The phone pulls when the app opens or resumes, shortly after a local change, after sign-in, or on "Sync now".
 - **Each device uses its own clock** for `updated_at_ms`.
-- **Phone-only:** files and photos, timers and focus or time sessions, breaks, attendance, week insights and daily-planning settings are not synced, so they are not shown here. A task finished on the desktop doesn't stop a timer running for it on the phone until you open that task there.
+- **Running clocks are per device.** A timer started here does not show as running on the phone (and the other way round); the time it logs does sync. Files, photos and daily-planning settings stay on the phone.
 - **Dates are AD only.** The phone can show BS first; that needs its verified BS tables ported here.
 - **English only.** The phone's Nepali text is not here yet; Numerals १२३ works.
 
