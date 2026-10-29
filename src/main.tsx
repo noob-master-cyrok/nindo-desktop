@@ -15,3 +15,11 @@ createRoot(document.getElementById('root')!).render(
     </SettingsProvider>
   </StrictMode>,
 );
+
+// Lets the app open without internet once it has been opened online. Only in
+// the built site: the dev server's files change on every save.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => undefined);
+  });
+}

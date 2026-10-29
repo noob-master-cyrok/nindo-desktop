@@ -7,6 +7,7 @@ import {
   parseClock,
   pauseTimers,
   resetTimer,
+  restMinutes,
   runningTimers,
   startFocus,
   startTimer,
@@ -17,6 +18,7 @@ import {
   type Log,
 } from '../domain/clock';
 import { isClosed, type PlannerTask } from '../domain/planner';
+import { alertInBackground, askForAlerts } from './alerts';
 
 const key = 'nindo.desktop.clock';
 
@@ -100,7 +102,13 @@ export function useTimers({
     const r = tickFocus(state, now);
     if (!r.event) return;
     apply(r.state, r.logs);
-    say(r.event === 'rest' ? `Focus round done. Take ${5} minutes.` : 'Rest over. Ready for the next round.');
+    if (r.event === 'rest') {
+      say(`Focus round done. Take ${restMinutes} minutes.`);
+      alertInBackground('Focus round done', `${state.focus?.title ?? 'Your task'}: take ${restMinutes} minutes.`, `focus-${state.focus?.endsAt}`);
+    } else {
+      say('Rest over. Ready for the next round.');
+      alertInBackground('Rest over', 'Ready for the next round.', `focus-${state.focus?.endsAt}`);
+    }
   }, [now, state, apply, say]);
 
   // Closing a task (here or on the phone) pauses its timer and focus;
@@ -134,6 +142,7 @@ export function useTimers({
     },
     reset: (taskId: string) => apply(resetTimer(state, taskId)),
     startFocus: (task: PlannerTask, minutes: number) => {
+      askForAlerts();
       const t = Date.now();
       setNow(t);
       const stopped = stopFocus(state, t);
