@@ -47,6 +47,11 @@ function seed(server: MockSupabase) {
     id: 'a1b2c3d4-0000-4000-8000-000000000003', parent_id: TASK_ID, title: 'Collect numbers',
     status: 'todo', critical: false,
   }));
+  const now = new Date();
+  now.setHours(9, 0, 0, 0);
+  const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  server.seed('planner_sessions', { id: 'se1', task_id: TASK_ID, kind: 'focus', started_at_ms: now.getTime(), minutes: 25, created_at_ms: 1, updated_at_ms: 1, deleted_at_ms: null });
+  server.seed('planner_attendance', { id: iso, check_in_ms: now.getTime(), check_out_ms: null, note: '', edited: false, created_at_ms: now.getTime(), updated_at_ms: now.getTime(), deleted_at_ms: null });
   server.seed('planner_activity', {
     id: 'act-1', task_id: TASK_ID, kind: 'comment', body: 'Ask Maya for the charts',
     created_at_ms: 2_000, updated_at_ms: 2_000, deleted_at_ms: null,
@@ -174,6 +179,16 @@ test('sign in and work through the Tasks screen', async ({ page }) => {
   await expect(page.getByRole('button', { name: /Prepare client deck v2/ }).first()).toBeVisible();
   await page.getByRole('button', { name: /Filtered/ }).click();
   await expect(page.getByRole('button', { name: 'Call the printer', exact: true })).toBeVisible();
+
+  // Attendance: set today's times by hand.
+  await page.getByRole('button', { name: 'Edit today' }).click();
+  await page.getByLabel('Check in').fill('09:15');
+  await page.getByLabel('Check out').fill('17:45');
+  await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('region', { name: 'Attendance' })).toContainText('Out');
+  const day = [...server.tables.planner_attendance!.values()][0]!;
+  expect(day).toMatchObject({ edited: true });
+  expect(new Date(day.check_out_ms as number).getHours()).toBe(17);
 
   // Settings: App colors and dark mode stay after a reload.
   await page.getByRole('button', { name: 'Settings' }).click();

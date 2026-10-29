@@ -43,6 +43,23 @@ function seed(server: MockSupabase) {
     { id: 's2', parent_id: 't1', project_id: 'p-work', title: 'Draft slides', status: 'todo', sort_order: 2 },
   ];
   for (const t of tasks) server.seed('planner_tasks', { ...base, ...t });
+  const day = new Date();
+  day.setHours(0, 0, 0, 0);
+  const at = (back: number, h: number, m = 0) => {
+    const d = new Date(day);
+    d.setDate(d.getDate() - back);
+    d.setHours(h, m, 0, 0);
+    return d.getTime();
+  };
+  for (let back = 0; back < 4; back++) {
+    server.seed('planner_sessions', { id: `se${back}a`, task_id: 't1', kind: 'focus', started_at_ms: at(back, 9), minutes: 25 + back * 20, created_at_ms: at(back, 9), updated_at_ms: at(back, 9), deleted_at_ms: null });
+    server.seed('planner_sessions', { id: `se${back}b`, task_id: 't5', kind: 'manual', started_at_ms: at(back, 14), minutes: 45, created_at_ms: at(back, 14), updated_at_ms: at(back, 14), deleted_at_ms: null });
+    server.seed('planner_break_runs', { id: `br${back}`, break_id: 'bk', started_at_ms: at(back, 12), ended_at_ms: at(back, 12, 20 + back * 5), updated_at_ms: at(back, 12), deleted_at_ms: null });
+    const d = new Date(at(back, 9));
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    server.seed('planner_attendance', { id: iso, check_in_ms: at(back, 9), check_out_ms: back === 0 ? null : at(back, 17, back * 10), note: '', edited: false, created_at_ms: at(back, 9), updated_at_ms: at(back, 9), deleted_at_ms: null });
+  }
+  server.seed('planner_breaks', { id: 'bk', title: 'Walk', description: '', created_at_ms: 1, updated_at_ms: 1, deleted_at_ms: null });
   server.seed('planner_activity', {
     id: 'a1', task_id: 't1', kind: 'comment', body: 'Ask Maya for the charts',
     created_at_ms: now - 600_000, updated_at_ms: now - 600_000, deleted_at_ms: null,
@@ -69,11 +86,15 @@ for (const scheme of ['light', 'dark'] as const) {
     const server = new MockSupabase(ORIGIN);
     seed(server);
     await server.install(page);
+    page.on('console', (m) => m.type() === 'warning' && console.log('PAGE', m.text()));
     await page.goto('/');
     await page.screenshot({ path: `test-results/screens/${scheme}-signin.png` });
     await signIn(page, server);
     await page.mouse.move(0, 0);
     await page.screenshot({ path: `test-results/screens/${scheme}-list.png` });
+    await page.getByRole('region', { name: 'This week' }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `test-results/screens/${scheme}-week.png` });
+    await page.evaluate(() => document.querySelector('.list-pane')!.scrollTo(0, 0));
     await page.getByText('Prepare client deck').first().click();
     await expect(page.getByText('Ask Maya for the charts')).toBeVisible();
     await page.mouse.move(0, 0);

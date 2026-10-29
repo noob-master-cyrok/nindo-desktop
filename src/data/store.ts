@@ -1,7 +1,15 @@
 /// The narrow database surface the repositories need. The Supabase version
 /// lives in `supabaseStore.ts`; tests use an in-memory fake that copies the
 /// server triggers.
-export type Table = 'planner_projects' | 'planner_tasks' | 'planner_links' | 'planner_activity';
+export type Table =
+  | 'planner_projects'
+  | 'planner_tasks'
+  | 'planner_links'
+  | 'planner_activity'
+  | 'planner_sessions'
+  | 'planner_breaks'
+  | 'planner_break_runs'
+  | 'planner_attendance';
 
 export type Row = Record<string, unknown> & { id: string; revision: number };
 

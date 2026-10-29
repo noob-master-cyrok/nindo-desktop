@@ -16,6 +16,7 @@ import {
 } from '../domain/planner';
 import type { Store, Table } from './store';
 import { buildPatch } from './writeRules';
+import type { AttendanceDay, Break, BreakRun, Session, TimeData } from '../domain/time';
 
 export type SaveResult<T> =
   | { status: 'saved'; row: T }
@@ -240,6 +241,62 @@ export class PlannerRepo {
       out.push(...(page as T[]));
       if (page.length < pageSize) return out;
     }
+  }
+
+  /// Worked time, breaks and attendance since [sinceMs] (this week and
+  /// today). Empty before the phone has uploaded them, or when the server has
+  /// no such tables yet.
+  async timeSince(sinceMs: number): Promise<TimeData | null> {
+    const since = { column: 'started_at_ms', value: sinceMs };
+    try {
+      const [sessions, runs, breaks, attendance] = await Promise.all([
+        this.pages<Session>('planner_sessions', since),
+        this.pages<BreakRun>('planner_break_runs', since),
+        this.pages<Break>('planner_breaks'),
+        this.pages<AttendanceDay>('planner_attendance', { column: 'updated_at_ms', value: sinceMs }),
+      ]);
+      return { sessions, runs, breaks, attendance };
+    } catch (e) {
+      console.warn('[nindo] time data unavailable', e instanceof Error ? e.message : 'error');
+      return null;
+    }
+  }
+
+  private async pages<T>(table: Table, since?: { column: string; value: number }): Promise<T[]> {
+    const out: T[] = [];
+    for (let from = 0; ; from += 1000) {
+      const page = await this.store.list(table, { since, from, to: from + 999 });
+      out.push(...(page as T[]));
+      if (page.length < 1000) return out;
+    }
+  }
+
+  /// Sets one day's check-in, check-out and note by hand, as the phone's
+  /// attendance sheet does ([day] is yyyy-mm-dd).
+  async saveAttendance(
+    day: string,
+    values: { check_in_ms: number | null; check_out_ms: number | null; note: string },
+  ): Promise<SaveResult<AttendanceDay>> {
+    if (values.note.length > 2000) return { status: 'invalid', problems: ['The note is too long.'] };
+    const now = this.now();
+    const existing = (await this.store.fetchById('planner_attendance', day)) as AttendanceDay | null;
+    if (!existing) {
+      return this.insert<AttendanceDay>('planner_attendance', {
+        id: day,
+        ...values,
+        edited: true,
+        created_at_ms: now,
+        updated_at_ms: now,
+        deleted_at_ms: null,
+      });
+    }
+    if (existing.deleted_at_ms != null) {
+      // A day removed on the phone comes back with these values.
+      const patch = buildPatch(existing as unknown as Record<string, unknown>, { ...values, edited: true, deleted_at_ms: null }, now);
+      const saved = await this.store.updateIfRevision('planner_attendance', day, existing.revision, patch);
+      return saved ? { status: 'saved', row: saved as unknown as AttendanceDay } : { status: 'gone' };
+    }
+    return casUpdate<AttendanceDay>(this.store, 'planner_attendance', day, existing.revision, { ...values, edited: true, deleted_at_ms: null }, now);
   }
 
   async createProject(name: string, color: number, existing: Project[]): Promise<SaveResult<Project>> {

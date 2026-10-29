@@ -127,7 +127,7 @@ export function Highlights({
   onOpen,
 }: {
   tasks: PlannerTask[];
-  activity: Activity[];
+  activity: Pick<Activity, 'task_id' | 'kind' | 'body' | 'created_at_ms'>[];
   projects: Project[];
   dayStart: number;
   onOpen: (id: string) => void;

@@ -13,6 +13,10 @@ export class MockSupabase {
     planner_tasks: new Map(),
     planner_links: new Map(),
     planner_activity: new Map(),
+    planner_sessions: new Map(),
+    planner_breaks: new Map(),
+    planner_break_runs: new Map(),
+    planner_attendance: new Map(),
   };
   private revision = 1000;
 

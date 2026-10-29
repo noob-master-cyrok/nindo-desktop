@@ -953,6 +953,10 @@ ul.ruled > li + li {
   font-weight: 400;
   text-align: left;
 }
+.hl-row {
+  display: flex;
+  align-items: center;
+}
 .hl-row:hover {
   background: var(--seg);
 }
@@ -967,6 +971,7 @@ ul.ruled > li + li {
   white-space: nowrap;
 }
 .hl-when {
+  margin-left: auto;
   white-space: nowrap;
 }
 .foot-note {
@@ -1260,4 +1265,44 @@ ul.ruled > li + li {
     transition: none !important;
     animation: none !important;
   }
+}
+
+/* Week insights bars. */
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+}
+.bar-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+}
+.bar-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.bar-track {
+  width: 100%;
+  max-width: 36px;
+  height: 56px;
+  display: flex;
+  align-items: flex-end;
+  border-radius: 8px;
+  background: var(--seg);
+  overflow: hidden;
+}
+.bar-fill {
+  width: 100%;
+  border-radius: 8px;
+  transition: height var(--base) var(--standard);
+}
+.bar-fill.acc { background: var(--acc); }
+.bar-fill.done { background: var(--done); }
+.bar-fill.ink { background: var(--ink2); }
+.bar-value {
+  font-variant-numeric: tabular-nums;
 }

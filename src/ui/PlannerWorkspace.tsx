@@ -22,9 +22,11 @@ import {
   type Status,
 } from '../domain/planner';
 import { plannerToCsv } from '../domain/plannerCsv';
+import { sessionsAsActivity, startOfLocalDay, weekStart, type TimeData } from '../domain/time';
 import { useSettings } from '../settings';
 import { Board } from './Board';
 import { DailyPlanningCard, Highlights, Summary } from './Cards';
+import { AttendanceCard, BreaksCard, WeekInsights } from './TimeCards';
 import { FilterDialog } from './FilterDialog';
 import { BoardIcon, Chevron, Close, Download, FilterIcon, Gear, ListIcon, Plus, Refresh, Search, Sliders, StatusIcon } from './Icons';
 import { Modal } from './Modal';
@@ -58,6 +60,7 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
   const [tasks, setTasks] = useState<PlannerTask[] | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
+  const [time, setTime] = useState<TimeData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scope, setScope] = useState<Scope>('all');
   const [search, setSearch] = useState('');
@@ -80,10 +83,15 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
 
   const load = useCallback(async () => {
     try {
-      const [data, today] = await Promise.all([planner.load(), planner.activitySince(startOfToday())]);
+      const [data, today, timeData] = await Promise.all([
+        planner.load(),
+        planner.activitySince(startOfToday()),
+        planner.timeSince(startOfLocalDay(weekStart(localIsoDate(new Date())))),
+      ]);
       setTasks(data.tasks);
       setProjects(data.projects);
       setActivity(today);
+      setTime(timeData);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load your tasks.');
@@ -132,6 +140,12 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
     return map;
   }, [all]);
   const counts = summary(all, today, Date.now());
+  // Real sessions replace the phone's focus/time history lines, which would
+  // count the same minutes twice.
+  const highlightActivity = useMemo(
+    () => (time && time.sessions.length ? [...activity.filter((a) => a.kind !== 'focus' && a.kind !== 'time'), ...sessionsAsActivity(time.sessions)] : activity),
+    [activity, time],
+  );
   const openCount = (s: Scope) => visibleTasks(all, s, '', today).filter((t) => !isClosed(t.status)).length;
   const current = selected && selected !== 'new' ? (all.find((t) => t.id === selected) ?? null) : null;
   const activeProjects = projects.filter((p) => !p.archived);
@@ -168,11 +182,12 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
     return false;
   }
 
-  async function guarded(action: () => Promise<boolean | void>) {
+  async function guarded<T = boolean | void>(action: () => Promise<T>): Promise<T | undefined> {
     try {
-      await action();
+      return await action();
     } catch (e) {
       say(e instanceof Error ? e.message : 'Something went wrong. Try again.');
+      return undefined;
     }
   }
 
@@ -475,7 +490,27 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
           />
         )}
 
-        {tasks !== null && <Highlights tasks={all} activity={activity} projects={projects} dayStart={startOfToday()} onOpen={(id) => open(id)} />}
+        {tasks !== null && (
+          <Highlights tasks={all} activity={highlightActivity} projects={projects} dayStart={startOfToday()} onOpen={(id) => open(id)} />
+        )}
+        {time && <BreaksCard data={time} today={today} />}
+        {time && (
+          <AttendanceCard
+            data={time}
+            today={today}
+            onSave={async (day, values) => {
+              const result = await guarded(() => planner.saveAttendance(day, values));
+              if (result?.status === 'saved') {
+                say('Attendance saved.');
+                await load();
+                return null;
+              }
+              if (!result) return 'Something went wrong. Try again.';
+              return result.status === 'invalid' ? result.problems.join(' ') : 'That day changed on another device. Try again.';
+            }}
+          />
+        )}
+        {time && <WeekInsights data={time} today={today} />}
 
         <p className="muted small foot-note">
           Changes reach your phone the next time it opens or syncs. Timers, breaks, attendance, files and photos stay on your phone.
