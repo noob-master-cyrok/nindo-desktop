@@ -90,6 +90,13 @@ export const Chevron = ({ up, ...p }: P & { up?: boolean }) => (
     <path d={up ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'} />
   </Svg>
 );
+/// A window with its side panel: hides or shows the sidebar.
+export const SidebarIcon = (p: P) => (
+  <Svg {...p}>
+    <rect x="3.5" y="4.5" width="17" height="15" rx="3" />
+    <path d="M9.5 4.5v15" />
+  </Svg>
+);
 export const Calendar = (p: P) => (
   <Svg {...p}>
     <rect x="3.5" y="5" width="17" height="15" rx="3" />

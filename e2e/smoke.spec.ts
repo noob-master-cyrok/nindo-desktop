@@ -243,3 +243,95 @@ test('an expired sign-in link explains what to do', async ({ page }) => {
   await page.goto('/#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired');
   await expect(page.getByRole('alert')).toContainText('expired or was already used');
 });
+
+async function signIn(page: import('@playwright/test').Page, server: MockSupabase) {
+  const s = server.session();
+  await page.goto(
+    `/#access_token=${s.access_token}&refresh_token=${s.refresh_token}&expires_in=3600&expires_at=${s.expires_at}&token_type=bearer&type=magiclink`,
+  );
+  await expect(page.getByLabel('Signed in account')).toContainText(server.email);
+}
+
+test('the sidebar hides, peeks on hover, and stays hidden after a reload', async ({ page }) => {
+  const server = new MockSupabase(ORIGIN);
+  seed(server);
+  await server.install(page);
+  await signIn(page, server);
+  const lists = page.getByRole('navigation', { name: 'Task lists' });
+  const work = lists.getByRole('button', { name: /^Work/ });
+
+  await page.getByRole('button', { name: 'Hide sidebar' }).click();
+  await expect(work).toBeHidden();
+  await page.screenshot({ path: 'test-results/sidebar-hidden.png' });
+
+  // Pointing at the rail slides the lists out; they still work.
+  await page.getByRole('button', { name: 'Show sidebar' }).hover();
+  await expect(work).toBeVisible();
+  await page.waitForTimeout(600); // let the slide finish for the picture
+  await page.screenshot({ path: 'test-results/sidebar-peek.png' });
+  await work.click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Work');
+  await page.mouse.move(900, 500);
+  await expect(work).toBeHidden();
+
+  // Remembered on this computer.
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
+  await page.getByRole('button', { name: 'Show sidebar' }).click();
+  await page.mouse.move(900, 500);
+  await expect(work).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Hide sidebar' })).toBeVisible();
+
+  // The [ key does the same.
+  await page.keyboard.press('[');
+  await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
+});
+
+test('closing a task without Save keeps the edits', async ({ page }) => {
+  const server = new MockSupabase(ORIGIN);
+  seed(server);
+  await server.install(page);
+  await signIn(page, server);
+  const PASSPORT = 'a1b2c3d4-0000-4000-8000-000000000002';
+
+  // The close button.
+  await page.getByRole('button', { name: /^Prepare client deck/ }).click();
+  await page.getByLabel('Description').fill('Slides for Friday, 12 pages');
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByRole('region', { name: 'Task details' })).toBeHidden();
+  await expect(page.getByRole('status')).toContainText('Changes saved.');
+  expect(server.tables.planner_tasks!.get(TASK_ID)!.description).toBe('Slides for Friday, 12 pages');
+
+  // Escape.
+  await page.getByRole('button', { name: /^Prepare client deck/ }).click();
+  await page.getByLabel('Estimate (minutes)').fill('100');
+  await page.getByRole('heading', { name: 'Task', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('region', { name: 'Task details' })).toBeHidden();
+  await expect.poll(() => server.tables.planner_tasks!.get(TASK_ID)!.estimate_minutes).toBe(100);
+
+  // Opening another task.
+  await page.getByRole('button', { name: /^Prepare client deck/ }).click();
+  await page.getByRole('textbox', { name: 'Title', exact: true }).fill('Prepare client deck v3');
+  await page.getByRole('button', { name: /^Renew passport/ }).click();
+  await expect(page.getByRole('textbox', { name: 'Title', exact: true })).toHaveValue('Renew passport');
+  expect(server.tables.planner_tasks!.get(TASK_ID)!.title).toBe('Prepare client deck v3');
+
+  // Something that cannot be saved keeps the task open, with a way out.
+  await page.getByLabel('Estimate (minutes)').fill('soon');
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByRole('alert')).toContainText('whole number of minutes');
+  await expect(page.getByRole('textbox', { name: 'Title', exact: true })).toHaveValue('Renew passport');
+  await page.screenshot({ path: 'test-results/close-unsaved.png' });
+  await page.getByRole('button', { name: 'Close without saving' }).click();
+  await expect(page.getByRole('region', { name: 'Task details' })).toBeHidden();
+  expect(server.tables.planner_tasks!.get(PASSPORT)!.estimate_minutes).toBeNull();
+
+  // A new task with a title is added when its window closes.
+  await page.getByRole('button', { name: 'New task' }).click();
+  await page.getByRole('textbox', { name: 'Title', exact: true }).fill('Pay the electricity bill');
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByRole('status')).toContainText('Task added.');
+  await expect(page.getByRole('button', { name: /Pay the electricity bill/ }).first()).toBeVisible();
+});

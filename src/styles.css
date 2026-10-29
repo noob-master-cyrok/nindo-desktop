@@ -469,8 +469,25 @@ input.switch:checked::after {
   flex-direction: column;
   gap: 4px;
 }
-.sidebar .wordmark {
-  padding: 0 12px 20px;
+.side-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px 20px 12px;
+}
+.side-toggle {
+  color: var(--mute);
+  border-radius: var(--r-s);
+}
+.side-toggle:hover:not(:disabled) {
+  color: var(--ink);
+}
+.close-unsaved {
+  margin: 0;
+}
+.close-area:empty {
+  display: none;
 }
 .side-head {
   padding: 20px 12px 6px;
@@ -1919,4 +1936,92 @@ ul.ruled > li {
 .field > span.suffix-field .suffix {
   color: var(--mute);
   font-size: 13px;
+}
+
+/* ---- Hidden sidebar ----
+   A thin rail keeps the show button. Pointing at the rail slides the lists
+   out over the page; leaving them slides them back. The button keeps them. */
+.app.side-hidden {
+  grid-template-columns: 56px minmax(0, 1fr);
+}
+.app.side-hidden.with-task {
+  grid-template-columns: 56px minmax(0, 1fr) minmax(380px, 460px);
+}
+/* Hiding is instant, so the rail is never wider than the pointer expects. */
+.app.side-hidden,
+.app.side-hidden.with-task {
+  transition: none;
+}
+.side-rail {
+  position: relative;
+  z-index: 7;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 18px;
+  border-right: 1px solid var(--rule);
+  background: var(--bg);
+}
+.app.side-hidden .sidebar {
+  position: fixed;
+  z-index: 6;
+  top: 8px;
+  bottom: 8px;
+  left: 56px;
+  width: 248px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-l);
+  background: var(--card);
+  box-shadow: 12px 0 32px var(--glass-shadow);
+  transform: translateX(calc(-100% - 64px));
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    transform var(--fast) var(--standard),
+    opacity var(--fast) var(--standard),
+    visibility 0s linear var(--fast);
+}
+/* A short wait first, so a pointer passing by does not open it. */
+.side-rail:hover ~ .sidebar,
+.app.side-hidden:not(.no-peek) .sidebar:hover,
+.app.side-hidden:not(.no-peek) .sidebar:has(:focus-visible) {
+  transform: none;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    transform var(--base) var(--standard) 120ms,
+    opacity var(--fast) var(--standard) 120ms,
+    visibility 0s linear 120ms;
+}
+.app.side-hidden:not(.no-peek) .sidebar:hover,
+.app.side-hidden:not(.no-peek) .sidebar:has(:focus-visible) {
+  transition-delay: 0s;
+}
+@media (max-width: 1180px) {
+  .app.side-hidden,
+  .app.side-hidden.with-task {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+}
+/* On a narrow window the lists sit on top of the page; nothing to hide. */
+@media (max-width: 760px) {
+  .side-rail,
+  .side-toggle {
+    display: none;
+  }
+  .app.side-hidden,
+  .app.side-hidden.with-task {
+    grid-template-columns: 1fr;
+  }
+  .app.side-hidden .sidebar {
+    position: static;
+    width: auto;
+    border: none;
+    border-bottom: 1px solid var(--rule);
+    border-radius: 0;
+    box-shadow: none;
+    transform: none;
+    opacity: 1;
+    visibility: visible;
+  }
 }

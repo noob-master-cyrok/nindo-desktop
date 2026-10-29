@@ -28,7 +28,7 @@ import { Board } from './Board';
 import { DailyPlanningCard, Highlights, Summary } from './Cards';
 import { AttendanceCard, BreaksCard, WeekInsights } from './TimeCards';
 import { FilterDialog } from './FilterDialog';
-import { BoardIcon, Chevron, Close, Download, Expand, FilterIcon, Gear, Leaf, ListIcon, Pause, Plus, Refresh, Search, Sliders, StatusIcon } from './Icons';
+import { BoardIcon, Chevron, Close, Download, Expand, FilterIcon, Gear, Leaf, ListIcon, Pause, Plus, Refresh, Search, SidebarIcon, Sliders, StatusIcon } from './Icons';
 import { Modal } from './Modal';
 import { Segmented } from './Segmented';
 import { SettingsDialog } from './SettingsDialog';
@@ -58,6 +58,25 @@ function startOfToday(): number {
 
 type View = 'list' | 'board';
 
+const sidebarKey = 'nindo.desktop.sidebar';
+
+function sidebarWasHidden(): boolean {
+  try {
+    return localStorage.getItem(sidebarKey) === 'hidden';
+  } catch {
+    return false;
+  }
+}
+
+function rememberSidebar(hidden: boolean) {
+  try {
+    if (hidden) localStorage.setItem(sidebarKey, 'hidden');
+    else localStorage.removeItem(sidebarKey);
+  } catch {
+    // Private windows may refuse; the choice then lasts for this visit.
+  }
+}
+
 export function PlannerWorkspace({ email, planner, onSignOut }: { email: string; planner: PlannerRepo; onSignOut: () => void }) {
   const { num } = useSettings();
   const [tasks, setTasks] = useState<PlannerTask[] | null>(null);
@@ -79,6 +98,11 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
   const [dialog, setDialog] = useState<'filter' | 'settings' | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [fullClock, setFullClock] = useState(false);
+  const [sideHidden, setSideHidden] = useState(sidebarWasHidden);
+  // Just hidden with the pointer still on it: no peek until the pointer leaves.
+  const [noPeek, setNoPeek] = useState(false);
+  /// The open task panel's "save what is typed"; resolves false to stay open.
+  const saveOpenTask = useRef<(() => Promise<boolean>) | null>(null);
   const quickRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -110,13 +134,27 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
     return () => window.removeEventListener('focus', onFocus);
   }, [load]);
 
+  const toggleSidebar = useCallback(() => {
+    setSideHidden((hidden) => {
+      rememberSidebar(!hidden);
+      setNoPeek(!hidden);
+      return !hidden;
+    });
+  }, []);
+
+  /// Closes the task, saving edits first so a close never loses them.
+  const closeTask = useCallback(async () => {
+    const save = saveOpenTask.current;
+    if (!save || (await save())) setSelected(null);
+  }, []);
+
   useEffect(() => {
-    // Desktop keys: N new task, / search, Escape closes the task.
+    // Desktop keys: N new task, / search, [ sidebar, Escape closes the task.
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable;
       if (document.querySelector('dialog[open]')) return;
-      if (e.key === 'Escape' && !typing) setSelected(null);
+      if (e.key === 'Escape' && !typing) closeTask();
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === 'n' || e.key === 'N') {
         e.preventDefault();
@@ -124,11 +162,14 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
       } else if (e.key === '/') {
         e.preventDefault();
         searchRef.current?.focus();
+      } else if (e.key === '[') {
+        e.preventDefault();
+        toggleSidebar();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [closeTask, toggleSidebar]);
 
   const today = localIsoDate(new Date());
   const all = useMemo(() => tasks ?? [], [tasks]);
@@ -173,7 +214,10 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
       return row.deleted_at_ms == null ? [...rest, row] : rest;
     });
 
-  function open(id: string | 'new', title = '') {
+  async function open(id: string | 'new', title = '') {
+    // Opening another task closes this one, which saves its edits.
+    const save = saveOpenTask.current;
+    if (save && (id !== selected || id === 'new') && !(await save())) return;
     setSelected(id);
     setNewTitle(title);
     setPanelKey(id === 'new' ? `new-${Date.now()}` : id);
@@ -235,8 +279,7 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
           const result = await planner.restore(task, subtasks);
           if (result.status === 'saved') {
             await load();
-            setSelected(task.id);
-            setPanelKey(`${task.id}-${Date.now()}`);
+            open(task.id);
           } else say('That task could not be brought back.');
         }),
     });
@@ -290,10 +333,24 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
   const narrowed = filterActive(filter) || sort !== 'manual';
 
   return (
-    <div className={selected ? 'app with-task' : 'app'}>
+    <div className={['app', selected && 'with-task', sideHidden && 'side-hidden', noPeek && 'no-peek'].filter(Boolean).join(' ')}>
+      {sideHidden && (
+        <div className="side-rail" onPointerEnter={() => setNoPeek(false)}>
+          <button className="icon-button side-toggle" aria-label="Show sidebar" title="Show sidebar ([)" aria-expanded="false" onClick={toggleSidebar}>
+            <SidebarIcon size={20} />
+          </button>
+        </div>
+      )}
       <nav className="sidebar" aria-label="Task lists">
-        <div className="wordmark">
-          Nindo <span className="kicker">Tasks</span>
+        <div className="side-top">
+          <div className="wordmark">
+            Nindo <span className="kicker">Tasks</span>
+          </div>
+          {!sideHidden && (
+            <button className="icon-button small side-toggle" aria-label="Hide sidebar" title="Hide sidebar ([)" aria-expanded="true" onClick={toggleSidebar}>
+              <SidebarIcon />
+            </button>
+          )}
         </div>
         <ul className="nav-list">
           {scopes.map(({ scope: s, label }) => (
@@ -341,7 +398,7 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
         </div>
       </nav>
 
-      <main className="list-pane">
+      <main className="list-pane" onPointerEnter={() => setNoPeek(false)}>
         <header className="page-head">
           <h1 className="page-title">{scopeTitle}</h1>
           <div className="head-actions">
@@ -589,7 +646,9 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
               setTasks((list) => (list ?? []).filter((t) => t.id !== id && t.parent_id !== id));
               setSelected(null);
             }}
-            onClose={() => setSelected(null)}
+            onClose={closeTask}
+            onDiscard={() => setSelected(null)}
+            saveRef={saveOpenTask}
             timers={timers}
             onFullScreen={() => setFullClock(true)}
             onTimeChanged={load}

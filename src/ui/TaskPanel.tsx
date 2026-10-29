@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react';
 import type { PlannerRepo, SaveResult } from '../data/plannerRepo';
 import { diffFields } from '../data/writeRules';
 import {
@@ -134,6 +134,8 @@ export function TaskPanel({
   onDeleted,
   onGone,
   onClose,
+  onDiscard,
+  saveRef,
   timers,
   onFullScreen,
   onTimeChanged,
@@ -152,7 +154,12 @@ export function TaskPanel({
   /// Deleted with its sub-tasks; the page offers Undo.
   onDeleted: (task: PlannerTask, subtasks: PlannerTask[]) => void;
   onGone: (id: string) => void;
+  /// Asks to close; the page saves through saveRef first.
   onClose: () => void;
+  /// Closes and drops what is typed.
+  onDiscard: () => void;
+  /// Filled with "save what is typed", which the page runs before closing.
+  saveRef: RefObject<(() => Promise<boolean>) | null>;
   timers: Timers;
   onFullScreen: () => void;
   onTimeChanged: () => void;
@@ -167,6 +174,10 @@ export function TaskPanel({
   const [newSub, setNewSub] = useState('');
   const [newLink, setNewLink] = useState({ url: '', title: '' });
   const [comment, setComment] = useState('');
+  // Closes that tried to save and could not; then the panel offers to close
+  // without saving, and shows why next to the Save button.
+  const [closeFailed, setCloseFailed] = useState(0);
+  const unsavedRef = useRef<HTMLDivElement>(null);
 
   const edit = toEdit(form);
   const changes: TaskEdit =
@@ -176,7 +187,8 @@ export function TaskPanel({
           return diff.status ? { ...diff, ...statusChange(base, diff.status, Date.now()) } : diff;
         })()
       : {};
-  const dirty = base ? Object.keys(changes).length > 0 : form.title.trim() !== '';
+  // A value that cannot be saved still counts as an edit, so a close shows why.
+  const dirty = base ? typeof edit === 'string' || Object.keys(changes).length > 0 : form.title.trim() !== '';
   const subtasks = base ? sortTasks(all.filter((t) => t.parent_id === base.id), 'manual') : [];
 
   async function loadDetails(id: string) {
@@ -209,7 +221,7 @@ export function TaskPanel({
   }
 
   /// Runs a write and handles every outcome the same way.
-  async function run<T>(action: () => Promise<SaveResult<T>>, onSaved: (row: T) => void, done?: string) {
+  async function run<T>(action: () => Promise<SaveResult<T>>, onSaved: (row: T) => void, done?: string): Promise<boolean> {
     setBusy(true);
     setProblems([]);
     try {
@@ -217,6 +229,7 @@ export function TaskPanel({
       if (result.status === 'saved') {
         onSaved(result.row);
         if (done) onToast(done);
+        return true;
       } else if (result.status === 'invalid') setProblems(result.problems);
       else if (result.status === 'conflict') {
         const current = result.current as unknown;
@@ -228,6 +241,7 @@ export function TaskPanel({
     } finally {
       setBusy(false);
     }
+    return false;
   }
 
   function applySaved(row: PlannerTask) {
@@ -238,16 +252,52 @@ export function TaskPanel({
     loadDetails(row.id);
   }
 
-  function save(event: FormEvent) {
-    event.preventDefault();
-    if (typeof edit === 'string') return setProblems([edit]);
+  /// Saves what is typed; true when nothing is left unsaved.
+  async function saveForm(saved: string): Promise<boolean> {
+    if (!dirty) return true;
+    if (typeof edit === 'string') {
+      setProblems([edit]);
+      return false;
+    }
     if (!base) {
       const { title, ...rest } = edit;
       return run(() => planner.create({ title: title ?? '', ...rest }, all), applySaved, 'Task added.');
     }
-    if (!dirty) return;
-    return run(() => planner.update(base, changes), applySaved, 'Saved.');
+    return run(() => planner.update(base, changes), applySaved, saved);
   }
+
+  function save(event: FormEvent) {
+    event.preventDefault();
+    saveForm('Saved.');
+  }
+
+  // Closing without Save keeps the edits: the page saves through this first.
+  // A problem or a conflict keeps the panel open to show it.
+  useEffect(() => {
+    const saveOnClose = async () => {
+      if (!dirty) return true;
+      if (busy || conflict) return false;
+      const ok = await saveForm('Changes saved.');
+      setCloseFailed((n) => (ok ? 0 : n + 1));
+      return ok;
+    };
+    saveRef.current = saveOnClose;
+    return () => {
+      if (saveRef.current === saveOnClose) saveRef.current = null;
+    };
+  });
+
+  useEffect(() => {
+    if (closeFailed) unsavedRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [closeFailed]);
+
+  // Leaving or reloading the page cannot wait for a save, so ask first.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 
   return (
     <section className="editor" aria-label={base ? 'Task details' : 'New task'}>
@@ -361,13 +411,23 @@ export function TaskPanel({
           </label>
         </fieldset>
 
-        {problems.length > 0 && (
-          <ul className="error" role="alert">
-            {problems.map((p) => (
-              <li key={p}>{p}</li>
-            ))}
-          </ul>
-        )}
+        <div ref={unsavedRef} className="stack close-area">
+          {problems.length > 0 && (
+            <ul className="error" role="alert">
+              {problems.map((p) => (
+                <li key={p}>{p}</li>
+              ))}
+            </ul>
+          )}
+          {closeFailed > 0 && dirty && !busy && (
+            <p className="close-unsaved muted small">
+              Your changes are not saved yet.{' '}
+              <button type="button" className="text" onClick={onDiscard}>
+                Close without saving
+              </button>
+            </p>
+          )}
+        </div>
         <div className="row">
           <button className="primary" disabled={busy || !dirty}>
             {base ? 'Save' : 'Add task'}
