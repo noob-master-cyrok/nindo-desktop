@@ -5,13 +5,13 @@ import {
   filterActive,
   groupByProject,
   isClosed,
+  isOverdue,
   localIsoDate,
   noFilter,
   projectColors,
   sortTasks,
   statusLabels,
   statuses,
-  summary,
   visibleTasks,
   type Activity,
   type Filter,
@@ -25,10 +25,12 @@ import { plannerToCsv } from '../domain/plannerCsv';
 import { sessionsAsActivity, startOfLocalDay, weekStart, type TimeData } from '../domain/time';
 import { useSettings } from '../settings';
 import { Board } from './Board';
-import { DailyPlanningCard, Highlights, Summary } from './Cards';
+import { DailyPlanningCard, Highlights } from './Cards';
+import { DayPlanner } from './DayPlanner';
+import { bsLabel } from '../domain/bs';
 import { AttendanceCard, BreaksCard, WeekInsights } from './TimeCards';
 import { FilterDialog } from './FilterDialog';
-import { BoardIcon, Chevron, Close, Download, Expand, FilterIcon, Gear, Leaf, ListIcon, Pause, Plus, Refresh, Search, SidebarIcon, Sliders, StatusIcon } from './Icons';
+import { BoardIcon, Chevron, Close, DayIcon, Download, Expand, FilterIcon, Gear, Leaf, ListIcon, Pause, Plus, Refresh, Search, SidebarIcon, Sliders, StatusIcon } from './Icons';
 import { Modal } from './Modal';
 import { Segmented } from './Segmented';
 import { SettingsDialog } from './SettingsDialog';
@@ -56,9 +58,27 @@ function startOfToday(): number {
   return d.getTime();
 }
 
-type View = 'list' | 'board';
+type View = 'list' | 'board' | 'day';
 
 const sidebarKey = 'nindo.desktop.sidebar';
+const viewKey = 'nindo.desktop.view';
+
+function lastView(): View {
+  try {
+    const v = localStorage.getItem(viewKey);
+    return v === 'board' || v === 'day' ? v : 'list';
+  } catch {
+    return 'list';
+  }
+}
+
+function rememberView(view: View) {
+  try {
+    localStorage.setItem(viewKey, view);
+  } catch {
+    // Private windows may refuse; the choice then lasts for this visit.
+  }
+}
 
 function sidebarWasHidden(): boolean {
   try {
@@ -88,7 +108,11 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<Sort>('manual');
   const [filter, setFilter] = useState<Filter>(noFilter);
-  const [view, setView] = useState<View>('list');
+  const [view, setViewState] = useState<View>(lastView);
+  const setView = (v: View) => {
+    rememberView(v);
+    setViewState(v);
+  };
   const [collapsed, setCollapsed] = useState<Set<Status>>(() => new Set(['done', 'cancelled']));
   const [selected, setSelected] = useState<string | 'new' | null>(null);
   const [panelKey, setPanelKey] = useState('');
@@ -193,7 +217,13 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
     for (const t of all) if (t.parent_id) map.set(t.parent_id, [...(map.get(t.parent_id) ?? []), t]);
     return map;
   }, [all]);
-  const counts = summary(all, today, Date.now());
+  const todayStart = startOfToday();
+  const doneToday = all.filter((t) => !t.parent_id && t.status === 'done' && (t.completed_at_ms ?? 0) >= todayStart).length;
+  // The same count as the Day planner's ring: in progress, due today or overdue.
+  const openToday = all.filter((t) => !t.parent_id && !isClosed(t.status) && (t.status === 'doing' || t.due_date === today || isOverdue(t, today))).length;
+  const dayTotal = doneToday + openToday;
+  const heroDate = new Date();
+  const bsToday = bsLabel(today, num);
   // Real sessions replace the phone's focus/time history lines, which would
   // count the same minutes twice.
   const highlightActivity = useMemo(
@@ -285,6 +315,16 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
     });
   }
 
+  async function checkInOut() {
+    if (!time) return;
+    const day = time.attendance.find((a) => a.id === today);
+    const result = await guarded(() => planner.checkInOut(today, day, Date.now()));
+    if (result?.status === 'saved') {
+      say(day?.check_in_ms ? 'Checked out. See you tomorrow.' : 'Checked in. Have a good day.');
+      await load();
+    } else if (result?.status === 'already') say('You already checked out today.');
+  }
+
   function exportCsv() {
     const csv = '﻿' + plannerToCsv(all, projects);
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -307,6 +347,7 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
       onOpen={() => open(t.id)}
       onCycle={() => cycle(t)}
       run={runOf(t)}
+      lead={!card}
       onToggleTimer={() => timers.toggle(t)}
     />
   );
@@ -399,18 +440,86 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
       </nav>
 
       <main className="list-pane" onPointerEnter={() => setNoPeek(false)}>
-        <header className="page-head">
-          <h1 className="page-title">{scopeTitle}</h1>
-          <div className="head-actions">
-            <button className="icon-button" aria-label="Filter" title="Filter and sort" onClick={() => setDialog('filter')}>
-              <FilterIcon on={narrowed} size={22} />
+        <header className="hero">
+          <div className="hero-date" role="group" aria-label={`Today, ${heroDate.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}${bsToday ? `, ${bsToday}` : ''}`}>
+            <span className="hero-day" aria-hidden="true">
+              {num(String(heroDate.getDate()))}
+            </span>
+            <span className="hero-words" aria-hidden="true">
+              <span className="kicker">{heroDate.toLocaleDateString('en-GB', { weekday: 'long' })} · Today</span>
+              <span className="hero-month">{heroDate.toLocaleDateString('en-GB', { month: 'long' })}</span>
+              {bsToday && <span className="hero-bs">{bsToday}</span>}
+            </span>
+          </div>
+          <div className="hero-actions">
+            {dayTotal > 0 && (
+              <div className="hero-progress" role="img" aria-label={`${doneToday} of ${dayTotal} done today`}>
+                <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+                  <circle cx="20" cy="20" r="16" className="ring-track" strokeWidth="4" />
+                  <circle
+                    cx="20"
+                    cy="20"
+                    r="16"
+                    className="ring-fill done"
+                    strokeWidth="4"
+                    strokeDasharray={`${(2 * Math.PI * 16 * doneToday) / dayTotal} 200`}
+                    transform="rotate(-90 20 20)"
+                  />
+                </svg>
+                <span className="hero-progress-text">
+                  <b>{num(`${doneToday} of ${dayTotal}`)}</b>
+                  <span className="muted small">done today</span>
+                </span>
+              </div>
+            )}
+            <button className="secondary break-button" onClick={timers.takeBreak} title="Take a break: pauses your timers">
+              <Leaf size={18} /> Take a break
             </button>
+            <button className="primary" onClick={() => open('new')} title="New task with every detail">
+              <Plus size={18} /> New task
+            </button>
+          </div>
+        </header>
+
+        {(liveIds.length > 0 || timers.state.focus) && (
+          <div className="running-bar" role="status" aria-label="Running timers">
+            <span className="pulse" aria-hidden="true" />
+            <span className="running-words">
+              <span className="kicker acc-ink">{timers.state.focus ? (timers.state.focus.phase === 'focus' ? 'Focus round' : 'Rest') : liveIds.length > 1 ? `${num(liveIds.length)} timers running` : 'Running now'}</span>
+              <span className="running-title">
+                {timers.state.focus ? timers.state.focus.title : liveIds.length === 1 ? (all.find((t) => t.id === liveIds[0])?.title ?? 'Task') : liveIds.map((id) => all.find((t) => t.id === id)?.title ?? 'Task').join(' · ')}
+              </span>
+            </span>
+            <span className="running-clock">
+              {num(
+                clockText(
+                  timers.state.focus
+                    ? timers.state.focus.endsAt - timers.now
+                    : Math.max(...liveIds.map((id) => timerElapsed(timers.state.timers[id], timers.now))),
+                ),
+              )}
+            </span>
+            {liveIds.length > 0 && (
+              <button className="round-button acc" aria-label={liveIds.length > 1 ? 'Pause all timers' : 'Pause timer'} title={liveIds.length > 1 ? 'Pause all' : 'Pause'} onClick={timers.pauseAll}>
+                <Pause size={16} />
+              </button>
+            )}
+            <button className="round-button" aria-label="Full screen" title="Full screen" onClick={() => setFullClock(true)}>
+              <Expand size={16} />
+            </button>
+          </div>
+        )}
+
+        <div className="page-head">
+          <h1 className="page-title">{view === 'day' ? 'Day planner' : scopeTitle}</h1>
+          <div className="head-actions">
             <Segmented<View>
               label="View"
               value={view}
               options={[
                 { value: 'list', label: <ListIcon size={18} />, title: 'List' },
                 { value: 'board', label: <BoardIcon size={18} />, title: 'Board' },
+                { value: 'day', label: <DayIcon size={18} />, title: 'Day planner' },
               ]}
               onChange={setView}
             />
@@ -421,29 +530,7 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
               <Download />
             </button>
           </div>
-        </header>
-
-        <Summary {...counts} />
-        {(liveIds.length > 0 || timers.state.focus) && (
-          <div className="running-bar" role="status" aria-label="Running timers">
-            <span className="pulse" aria-hidden="true" />
-            <span className="running-text">
-              {timers.state.focus
-                ? `${timers.state.focus.phase === 'focus' ? 'Focus' : 'Rest'} · ${num(clockText(timers.state.focus.endsAt - timers.now))} · ${timers.state.focus.title}`
-                : liveIds.length === 1
-                  ? `${num(clockText(timerElapsed(timers.state.timers[liveIds[0]!], timers.now)))} · ${all.find((t) => t.id === liveIds[0])?.title ?? 'Task'}`
-                  : `${num(liveIds.length)} timers running`}
-            </span>
-            <button className="icon-button small push" aria-label="Full screen" title="Full screen" onClick={() => setFullClock(true)}>
-              <Expand size={16} />
-            </button>
-            {liveIds.length > 0 && (
-              <button className="secondary small-button" onClick={timers.pauseAll}>
-                <Pause size={14} /> Pause {liveIds.length > 1 ? 'all' : ''}
-              </button>
-            )}
-          </div>
-        )}
+        </div>
         <DailyPlanningCard
           tasks={all}
           activity={activity}
@@ -466,41 +553,46 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
           }
         />
 
-        <div className="add-row">
-          <form
-            className="field-pill quick"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!quick.trim()) return;
-              create(quick.trim());
-              setQuick('');
-            }}
-          >
-            <Plus size={18} className="acc-ink" />
-            <input ref={quickRef} aria-label="Add a task" placeholder="Add a task" maxLength={300} value={quick} onChange={(e) => setQuick(e.target.value)} />
-            <button
-              type="button"
-              className="icon-button small"
-              aria-label="New task"
-              title="New task with every detail (N)"
-              onClick={() => {
-                open('new', quick);
+        {view !== 'day' && (
+          <div className="add-line">
+            <form
+              className="add-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!quick.trim()) return;
+                create(quick.trim());
                 setQuick('');
               }}
             >
-              <Sliders className="acc-ink" />
+              <Plus size={20} className="acc-ink" />
+              <input ref={quickRef} aria-label="Add a task" placeholder="Add a task" maxLength={300} value={quick} onChange={(e) => setQuick(e.target.value)} />
+              <span className="key-hint muted small" aria-hidden="true">
+                N
+              </span>
+              <button
+                type="button"
+                className="icon-button small"
+                aria-label="Add with details"
+                title="Add with every detail"
+                onClick={() => {
+                  open('new', quick);
+                  setQuick('');
+                }}
+              >
+                <Sliders className="acc-ink" />
+              </button>
+            </form>
+            <label className="search-inline">
+              <Search size={16} className="muted" />
+              <input ref={searchRef} type="search" aria-label="Search tasks" placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </label>
+            <button className="icon-button" aria-label="Filter" title="Filter and sort" onClick={() => setDialog('filter')}>
+              <FilterIcon on={narrowed} size={22} />
             </button>
-          </form>
-          <button className="break-button" onClick={timers.takeBreak} title="Take a break: pauses your timers">
-            <Leaf size={18} /> Take a break
-          </button>
-          <label className="field-pill search">
-            <Search size={16} className="muted" />
-            <input ref={searchRef} type="search" aria-label="Search tasks" placeholder="Search tasks" value={search} onChange={(e) => setSearch(e.target.value)} />
-          </label>
-        </div>
+          </div>
+        )}
 
-        {(filterActive(filter) || sort !== 'manual') && (
+        {view !== 'day' && (filterActive(filter) || sort !== 'manual') && (
           <div className="chips">
             <button className="chip on" aria-pressed="true" onClick={() => (setFilter(noFilter), setSort('manual'))}>
               Filtered <Close size={12} />
@@ -514,7 +606,7 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
           </p>
         )}
         {tasks === null && !error && <p className="muted">Loading your tasks…</p>}
-        {tasks !== null && shown.length === 0 && (
+        {tasks !== null && shown.length === 0 && view !== 'day' && (
           <p className="empty muted">
             {all.some((t) => !t.parent_id) ? 'No tasks match.' : 'No tasks here yet. Add one above, or open Nindo on your phone once so it uploads your tasks.'}
           </p>
@@ -585,22 +677,28 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
           />
         )}
 
-        {tasks !== null && (
+        {tasks !== null && view === 'day' && (
+          <DayPlanner
+            tasks={all}
+            projects={projects}
+            time={time}
+            timers={timers}
+            today={today}
+            attendance={time?.attendance.find((a) => a.id === today)}
+            onOpen={(id) => open(id)}
+            onCheck={checkInOut}
+          />
+        )}
+
+        {tasks !== null && view !== 'day' && (
           <Highlights tasks={all} activity={highlightActivity} projects={projects} dayStart={startOfToday()} onOpen={(id) => open(id)} />
         )}
         {time && <BreaksCard data={time} today={today} />}
-        {time && (
+        {time && view !== 'day' && (
           <AttendanceCard
             data={time}
             today={today}
-            onCheck={async () => {
-              const day = time.attendance.find((a) => a.id === today);
-              const result = await guarded(() => planner.checkInOut(today, day, Date.now()));
-              if (result?.status === 'saved') {
-                say(day?.check_in_ms ? 'Checked out. See you tomorrow.' : 'Checked in. Have a good day.');
-                await load();
-              } else if (result?.status === 'already') say('You already checked out today.');
-            }}
+            onCheck={checkInOut}
             onSave={async (day, values) => {
               const result = await guarded(() => planner.saveAttendance(day, values));
               if (result?.status === 'saved') {
@@ -722,7 +820,7 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
         </Modal>
       )}
 
-      <BreakCover timers={timers} />
+      <BreakCover timers={timers} tasks={all} />
       {fullClock && <FullClock timers={timers} tasks={all} onClose={() => setFullClock(false)} />}
       <Toast toast={toast} onDone={hideToast} />
     </div>

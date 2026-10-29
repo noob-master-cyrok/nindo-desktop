@@ -2025,3 +2025,634 @@ ul.ruled > li {
     visibility: visible;
   }
 }
+
+/* ---- 2026-10 refresh: A "Almanac Ledger" page + B "Day planner" ---- */
+
+/* The date hero: a big day number with the month, weekday and BS date,
+   over a heavy ink rule, like the top of an almanac page. */
+.hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px 24px;
+  padding-bottom: 20px;
+  border-bottom: 2px solid var(--ink);
+}
+.hero-date {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+}
+.hero-day {
+  font-size: 96px;
+  font-weight: 600;
+  line-height: 0.84;
+  letter-spacing: -4px;
+  font-variant-numeric: tabular-nums;
+}
+.hero-words {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 4px;
+}
+.hero-month {
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.5px;
+}
+.hero-bs {
+  font-size: 15px;
+  color: var(--ink2);
+}
+.hero-actions {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.hero-actions > button {
+  min-height: 44px;
+}
+.hero-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 4px;
+}
+.hero-progress-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.ring-track {
+  fill: none;
+  stroke: var(--rule);
+  stroke-width: 7;
+}
+.ring-fill {
+  fill: none;
+  stroke: var(--acc);
+  stroke-width: 7;
+  stroke-linecap: round;
+  transition: stroke-dasharray var(--base) var(--standard);
+}
+.ring-fill.done {
+  stroke: var(--done);
+}
+.ring-text {
+  fill: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Running now: a calm accent strip with the live clock. */
+.running-bar {
+  gap: 16px;
+  padding: 12px 12px 12px 18px;
+  border-radius: var(--r-l);
+  border: none;
+  color: var(--ink);
+  font-weight: 400;
+}
+.running-words {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.running-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.running-clock {
+  margin-left: auto;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--acc-ink);
+  font-variant-numeric: tabular-nums;
+}
+.round-button {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: none;
+  color: var(--ink2);
+}
+.round-button:hover:not(:disabled) {
+  background: var(--seg);
+}
+.round-button.acc {
+  background: var(--acc);
+  color: var(--on-acc);
+}
+.round-button.acc:hover:not(:disabled) {
+  background: var(--acc);
+  box-shadow: 0 4px 14px var(--acc-shadow);
+}
+
+/* Quick add: one ruled line, not a box. */
+.add-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--rule2);
+  padding: 0 0 0 4px;
+}
+.add-form {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+}
+.add-form input,
+.search-inline input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 17px;
+  outline: none;
+  box-shadow: none;
+}
+.add-form:focus-within {
+  box-shadow: inset 0 -2px 0 var(--acc);
+}
+.key-hint {
+  border: 1px solid var(--rule2);
+  border-radius: 6px;
+  padding: 0 6px;
+  line-height: 18px;
+}
+.search-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 200px;
+  height: 36px;
+  padding: 0 12px;
+  border-left: 1px solid var(--rule);
+}
+.search-inline input {
+  font-size: 15px;
+}
+
+/* Ruled sections: a heavier rule under each status head. */
+.section-head {
+  border-bottom: 1px solid var(--rule2);
+  padding-bottom: 4px;
+}
+
+/* The date lead column on list rows. */
+.tile-lead {
+  flex: 0 0 60px;
+  padding: 11px 0 0 8px;
+  font-size: 13px;
+  color: var(--mute);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tile-lead.overdue {
+  color: var(--attn);
+  font-weight: 600;
+}
+.tile-lead.now {
+  color: var(--acc-ink);
+  font-weight: 600;
+}
+.row-tile .tile-title {
+  font-size: 17px;
+}
+.attn-ink {
+  color: var(--attn);
+}
+.done-ink {
+  color: var(--done);
+}
+
+/* The task editor reads like a page: bigger title, ruled fields. */
+.detail-pane .title-input {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+  border: none;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  padding: 4px 0 8px;
+  background: transparent;
+}
+.detail-pane .title-input:focus {
+  border-bottom-color: var(--acc);
+  box-shadow: none;
+}
+
+/* ---- B: the Day planner ---- */
+.day-planner {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.week-strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+.week-day {
+  flex-direction: column;
+  gap: 2px;
+  min-height: 68px;
+  padding: 6px 4px;
+  border: none;
+  border-radius: var(--r-l);
+  color: var(--ink2);
+}
+.week-day:hover:not(.on) {
+  background: var(--seg);
+}
+.week-day small {
+  font-size: 11px;
+  color: var(--mute);
+  white-space: nowrap;
+}
+.week-day b {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.week-day.today:not(.on) b {
+  color: var(--acc-ink);
+}
+.week-day.on {
+  background: var(--acc);
+}
+.week-day.on b,
+.week-day.on small {
+  color: var(--on-acc);
+}
+.day-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: flex-start;
+}
+.timeline {
+  position: relative;
+  flex: 999 1 420px;
+  min-width: 0;
+  margin-top: 10px;
+}
+.hour {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--rule);
+}
+.hour span {
+  position: absolute;
+  left: 0;
+  top: -9px;
+  width: 56px;
+  padding-right: 4px;
+  font-size: 12px;
+  color: var(--mute);
+  background: var(--bg);
+  font-variant-numeric: tabular-nums;
+}
+.blk {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0;
+  min-height: 0;
+  padding: 4px 10px;
+  overflow: hidden;
+  border-radius: var(--r-m);
+  border: 1px solid var(--rule);
+  background: var(--card);
+  text-align: left;
+  font-weight: 400;
+  animation: fade-up var(--base) var(--standard);
+}
+button.blk:hover {
+  border-color: var(--rule2);
+  box-shadow: 0 4px 14px var(--glass-shadow);
+}
+.blk.live {
+  background: var(--acc-tint);
+  border: 2px solid var(--acc);
+}
+.blk.break {
+  background: color-mix(in srgb, var(--done) 12%, transparent);
+  border: 1.5px dashed var(--done);
+  color: var(--done);
+}
+.blk.planned {
+  background: transparent;
+  border: 1.5px dashed var(--acc);
+  border-top: none;
+  border-radius: 0 0 var(--r-m) var(--r-m);
+  opacity: 0.6;
+  animation: none;
+}
+.blk-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.blk.live .blk-title {
+  color: var(--acc-ink);
+}
+.blk-time {
+  font-size: 12px;
+  color: var(--mute);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.blk.break .blk-time,
+.blk.break .blk-title {
+  color: var(--done);
+}
+.now-line {
+  position: absolute;
+  left: 56px;
+  right: 0;
+  height: 2px;
+  background: var(--acc);
+  z-index: 2;
+  pointer-events: none;
+}
+.now-line span {
+  position: absolute;
+  left: -56px;
+  top: -10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--acc);
+  color: var(--on-acc);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.timeline-empty {
+  position: absolute;
+  left: 72px;
+  right: 8px;
+  top: 40%;
+  text-align: center;
+}
+.day-side {
+  flex: 1 1 280px;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.day-card {
+  margin-top: 0;
+  border-radius: var(--r-pop);
+  padding: 20px;
+  gap: 14px;
+}
+.day-stats {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.day-numbers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+  color: var(--mute);
+}
+.day-numbers b {
+  font-size: 20px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.day-numbers b.done-ink {
+  color: var(--done);
+}
+.day-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule);
+}
+.side-list-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rule2);
+  margin-bottom: 2px;
+}
+.open-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.open-main {
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 56px;
+  border: none;
+  border-radius: var(--r-s);
+  padding: 6px 4px;
+  text-align: left;
+  font-weight: 400;
+}
+.open-main:hover {
+  background: var(--seg);
+}
+.open-title {
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.open-row .tile-timer {
+  opacity: 1;
+}
+
+@media (max-width: 720px) {
+  .hero-day {
+    font-size: 72px;
+  }
+  .hero-actions {
+    margin-left: 0;
+  }
+  .search-inline {
+    width: 120px;
+  }
+  .key-hint {
+    display: none;
+  }
+  .week-day small:last-child {
+    display: none;
+  }
+  .day-side {
+    max-width: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .blk {
+    animation: none;
+  }
+}
+
+/* ---- B: focus ring and break page ---- */
+.break-cover {
+  background: color-mix(in srgb, var(--done) 14%, var(--bg));
+}
+.break-inner {
+  width: min(520px, 100%);
+}
+.break-icon {
+  width: 104px;
+  height: 104px;
+  background: var(--card);
+}
+.big-clock.huge.done-ink {
+  color: var(--done);
+}
+.break-note {
+  color: var(--ink2);
+}
+.break-ideas {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.break-idea {
+  min-height: 44px;
+  border-color: color-mix(in srgb, var(--done) 45%, transparent);
+  color: var(--done);
+  background: var(--card);
+}
+.break-idea.on {
+  background: var(--done);
+  border-color: var(--done);
+  color: var(--on-acc);
+}
+.break-name {
+  width: 100%;
+  background: var(--card);
+}
+.clock-face {
+  position: relative;
+  width: min(380px, 52vh, 80vw);
+  aspect-ratio: 1;
+}
+.clock-ring {
+  width: 100%;
+  height: 100%;
+}
+.clock-ring-track {
+  fill: none;
+  stroke: #1f1e24;
+  stroke-width: 16;
+}
+.clock-ring-fill {
+  fill: none;
+  stroke: #e0679a;
+  stroke-width: 16;
+  stroke-linecap: round;
+  transition: stroke-dasharray 1s linear;
+}
+.clock-ring.done .clock-ring-fill {
+  stroke: #7cc49a;
+}
+.clock-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.clock-face .full-digits {
+  font-size: clamp(48px, 9vh, 96px);
+}
+.full-sub {
+  font-size: 15px;
+  color: #a29c91;
+}
+.full-switch {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+.full-arrow {
+  min-width: 56px;
+  min-height: 56px;
+  padding: 0;
+  border-color: #302e33;
+  color: #cec8bd;
+  font-size: 28px;
+  line-height: 1;
+}
+.full-arrow:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.full-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+.full-button.acc {
+  background: #e0679a;
+  border-color: #e0679a;
+  color: #1c1b19;
+  font-weight: 600;
+}
+.full-button.acc:hover {
+  background: #e0679a;
+}
+.full-button.break {
+  color: #7cc49a;
+}
+@media (prefers-reduced-motion: reduce) {
+  .clock-ring-fill {
+    transition: none;
+  }
+}
+.break-inner button.text {
+  color: var(--done);
+}
+.blk {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  column-gap: 8px;
+}
+.day-check .small-button {
+  white-space: nowrap;
+}

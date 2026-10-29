@@ -23,6 +23,8 @@ export interface RunningBreak {
   id: string;
   title: string;
   startedAt: number;
+  /// Task timers the break paused, so "Back to work" can start them again.
+  resume?: string[];
 }
 
 export interface ClockState {
@@ -127,12 +129,37 @@ export function tickFocus(state: ClockState, now: number): { state: ClockState; 
   return { state: { ...state, focus: null }, logs: [], event: 'done' };
 }
 
+/// Follows task status: a closed task's timer and a focus round on it pause.
+/// When a task has just been marked done, every running timer and the focus
+/// round pause too.
+export function followStatus(
+  state: ClockState,
+  closed: Set<string>,
+  justDone: boolean,
+  now: number,
+): { state: ClockState; logs: Log[] } | null {
+  const stop = runningTimers(state).filter((id) => justDone || closed.has(id));
+  const focusDone = state.focus?.phase === 'focus' && (justDone || closed.has(state.focus.taskId));
+  if (!stop.length && !focusDone) return null;
+  const paused = pauseTimers(state, stop, now);
+  const stopped = focusDone ? stopFocus(paused.state, now) : { state: paused.state, logs: [] };
+  return { state: stopped.state, logs: [...paused.logs, ...stopped.logs] };
+}
+
 /// Takes a break: every task timer and a focus round pause first, as on the
 /// phone, so break time never counts as work.
 export function takeBreak(state: ClockState, id: string, now: number): { state: ClockState; logs: Log[] } {
-  const paused = pauseTimers(state, runningTimers(state), now);
+  const resume = runningTimers(state);
+  const paused = pauseTimers(state, resume, now);
   const stopped = stopFocus(paused.state, now);
-  return { state: { ...stopped.state, rest: { id, title: '', startedAt: now } }, logs: [...paused.logs, ...stopped.logs] };
+  return { state: { ...stopped.state, rest: { id, title: '', startedAt: now, resume } }, logs: [...paused.logs, ...stopped.logs] };
+}
+
+/// Ends the break; with [resume], the task timers it paused start again.
+export function endBreak(state: ClockState, now: number, resume: boolean, open: (taskId: string) => boolean): ClockState {
+  let next: ClockState = { ...state, rest: null };
+  if (resume) for (const id of state.rest?.resume ?? []) if (open(id)) next = startTimer(next, id, now);
+  return next;
 }
 
 export function parseClock(raw: string | null): ClockState {
@@ -148,7 +175,10 @@ export function parseClock(raw: string | null): ClockState {
     return {
       timers,
       focus: f && typeof f.endsAt === 'number' && typeof f.taskId === 'string' ? f : null,
-      rest: r && typeof r.startedAt === 'number' && typeof r.id === 'string' ? r : null,
+      rest:
+        r && typeof r.startedAt === 'number' && typeof r.id === 'string'
+          ? { ...r, resume: Array.isArray(r.resume) ? r.resume.filter((id) => typeof id === 'string') : [] }
+          : null,
     };
   } catch {
     return emptyClock;

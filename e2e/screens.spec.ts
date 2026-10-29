@@ -112,7 +112,7 @@ for (const scheme of ['light', 'dark'] as const) {
     await page.getByRole('button', { name: /Take a break/ }).click();
     await page.waitForTimeout(500);
     await page.screenshot({ path: `test-results/screens/${scheme}-break.png` });
-    await page.getByRole('button', { name: 'End break' }).click();
+    await page.getByRole('button', { name: 'Back to Prepare client deck' }).click();
     await page.setViewportSize({ width: 420, height: 900 });
     await page.waitForTimeout(400);
     await page.screenshot({ path: `test-results/screens/${scheme}-narrow-task.png` });
@@ -120,6 +120,14 @@ for (const scheme of ['light', 'dark'] as const) {
     await page.getByRole('button', { name: 'Close' }).click();
     await page.getByRole('radio', { name: 'Board' }).click();
     await page.screenshot({ path: `test-results/screens/${scheme}-board.png` });
+    await page.getByRole('radio', { name: 'Day planner' }).click();
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: `test-results/screens/${scheme}-day.png` });
+    await page.getByRole('button', { name: /^Prepare client deck, .*running/ }).click();
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `test-results/screens/${scheme}-day-task.png` });
+    await page.getByRole('button', { name: 'Close' }).click();
+    await page.getByRole('radio', { name: 'Board' }).click();
     await page.getByRole('button', { name: 'Filter', exact: true }).click();
     await page.waitForTimeout(500);
     await page.screenshot({ path: `test-results/screens/${scheme}-filter.png` });

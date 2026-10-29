@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clockText, emptyClock, parseClock, pauseTimers, startFocus, startTimer, stopFocus, takeBreak, tickFocus, timerElapsed } from '../src/domain/clock';
+import { clockText, emptyClock, endBreak, followStatus, parseClock, pauseTimers, startFocus, startTimer, stopFocus, takeBreak, tickFocus, timerElapsed } from '../src/domain/clock';
 
 const m = 60_000;
 
@@ -43,9 +43,36 @@ describe('desktop timers', () => {
       ['t', 10],
       ['u', 10],
     ]);
-    expect(r.state.rest).toEqual({ id: 'b1', title: '', startedAt: 10 * m });
+    expect(r.state.rest).toEqual({ id: 'b1', title: '', startedAt: 10 * m, resume: ['t'] });
     expect(r.state.focus).toBeNull();
     expect(r.state.timers.t!.startedAt).toBeNull();
+  });
+
+  it('closing a task pauses its own timer; marking one done pauses them all', () => {
+    let s = startTimer(emptyClock, 't', 0);
+    s = startTimer(s, 'u', 0);
+    s = startFocus(s, 'v', 'Read', 25, 0);
+    expect(followStatus(s, new Set(), false, 5 * m)).toBeNull();
+    const cancelled = followStatus(s, new Set(['t']), false, 5 * m)!;
+    expect(cancelled.logs.map((l) => l.taskId)).toEqual(['t']);
+    expect(cancelled.state.timers.u!.startedAt).toBe(0);
+    expect(cancelled.state.focus).not.toBeNull();
+    const done = followStatus(s, new Set(['t']), true, 5 * m)!;
+    expect(done.logs.map((l) => l.taskId)).toEqual(['t', 'u', 'v']);
+    expect(done.state.timers.u!.startedAt).toBeNull();
+    expect(done.state.focus).toBeNull();
+  });
+
+  it('ending a break can start the paused timers again', () => {
+    let s = startTimer(emptyClock, 't', 0);
+    s = startTimer(s, 'u', 0);
+    const onBreak = takeBreak(s, 'b1', 10 * m).state;
+    const back = endBreak(onBreak, 20 * m, true, (id) => id !== 'u');
+    expect(back.rest).toBeNull();
+    expect(back.timers.t!.startedAt).toBe(20 * m);
+    expect(back.timers.u!.startedAt).toBeNull();
+    expect(endBreak(onBreak, 20 * m, false, () => true).timers.t!.startedAt).toBeNull();
+    expect(parseClock(JSON.stringify(onBreak)).rest!.resume).toEqual(['t', 'u']);
   });
 
   it('formats and survives storage', () => {

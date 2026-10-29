@@ -263,3 +263,18 @@ export function PriorityIcon({ priority, size = 16 }: { priority: number; size?:
     </svg>
   );
 }
+
+/// The Day planner view: a day with blocks on an hour line.
+export const DayIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 5h16M4 19h16" />
+    <rect x="7" y="8" width="10" height="3.5" rx="1.2" />
+    <rect x="9" y="13" width="8" height="3" rx="1.2" />
+  </Svg>
+);
+export const SkipIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M6 5.5l9 6.5-9 6.5z" fill="currentColor" />
+    <path d="M18 5.5v13" />
+  </Svg>
+);

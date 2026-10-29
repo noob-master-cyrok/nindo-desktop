@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PlannerRepo } from '../data/plannerRepo';
 import {
   emptyClock,
+  endBreak,
+  followStatus,
   parseClock,
   pauseTimers,
   resetTimer,
@@ -101,16 +103,18 @@ export function useTimers({
     say(r.event === 'rest' ? `Focus round done. Take ${5} minutes.` : 'Rest over. Ready for the next round.');
   }, [now, state, apply, say]);
 
-  // Finishing a task (here or on the phone) pauses its timer and focus.
+  // Closing a task (here or on the phone) pauses its timer and focus;
+  // marking one done pauses every timer. Tasks already done when the list
+  // first loads don't count as just done.
+  const doneRef = useRef<Set<string> | null>(null);
   useEffect(() => {
+    const done = new Set(tasks.filter((t) => t.status === 'done' && t.deleted_at_ms == null).map((t) => t.id));
+    const before = doneRef.current;
+    if (before || tasks.length) doneRef.current = done;
+    const justDone = before != null && [...done].some((id) => !before.has(id));
     const closed = new Set(tasks.filter((t) => isClosed(t.status) || t.deleted_at_ms != null).map((t) => t.id));
-    const stop = runningTimers(state).filter((id) => closed.has(id));
-    const focusDone = state.focus?.phase === 'focus' && closed.has(state.focus.taskId);
-    if (!stop.length && !focusDone) return;
-    const t = Date.now();
-    const paused = pauseTimers(state, stop, t);
-    const stopped = focusDone ? stopFocus(paused.state, t) : { state: paused.state, logs: [] };
-    apply(stopped.state, [...paused.logs, ...stopped.logs]);
+    const r = followStatus(state, closed, justDone, Date.now());
+    if (r) apply(r.state, r.logs);
   }, [tasks, state, apply]);
 
   return {
@@ -146,12 +150,15 @@ export function useTimers({
       apply(r.state, r.logs);
     },
     nameBreak: (title: string) => state.rest && apply({ ...state, rest: { ...state.rest, title } }),
-    endBreak: async () => {
+    /// Ends the break; [resume] starts the timers it paused again.
+    endBreak: async (resume = false) => {
       const rest = state.rest;
       if (!rest) return;
-      apply({ ...state, rest: null });
+      const t = Date.now();
+      setNow(t);
+      apply(endBreak(state, t, resume, (id) => tasksRef.current.some((task) => task.id === id && !isClosed(task.status))));
       try {
-        const r = await planner.recordBreak(rest.id, rest.title, rest.startedAt, Date.now());
+        const r = await planner.recordBreak(rest.id, rest.title, rest.startedAt, t);
         if (r.status === 'saved') onLogged();
       } catch {
         say('That break could not be saved. Check your connection.');

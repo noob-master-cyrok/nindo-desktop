@@ -25,6 +25,7 @@ export function TaskTile({
   onCycle,
   run,
   onToggleTimer,
+  lead = false,
 }: {
   task: PlannerTask;
   /// Left out under a project heading, where it would repeat.
@@ -38,6 +39,9 @@ export function TaskTile({
   /// The task's timer or focus round: live text while it runs.
   run?: { running: boolean; text: string | null };
   onToggleTimer?: () => void;
+  /// List rows lead with the due date (or "Now" while a timer runs), as on
+  /// an almanac page; the date then leaves the meta line.
+  lead?: boolean;
 }) {
   const { num } = useSettings();
   const t = task;
@@ -74,7 +78,7 @@ export function TaskTile({
           <span className="dot" data-color={project.color} aria-hidden="true" /> {project.name}
         </span>
       )}
-      {t.due_date && (
+      {t.due_date && !lead && (
         <span className={overdue ? 'meta-item overdue' : 'meta-item'}>
           <Calendar size={12} /> {overdue && <span className="sr-only">Overdue, due </span>}
           {shortDate(t.due_date, today, num)}
@@ -96,6 +100,18 @@ export function TaskTile({
 
   return (
     <div className={['tile', card ? 'card-tile' : 'row-tile', selected ? 'selected' : '', live ? 'live' : ''].join(' ')}>
+      {lead && (
+        <span className={['tile-lead', live ? 'now' : overdue ? 'overdue' : ''].join(' ')}>
+          {live ? 'Now' : t.due_date ? (
+            <>
+              {overdue && <span className="sr-only">Overdue, due </span>}
+              {shortDate(t.due_date, today, num)}
+            </>
+          ) : (
+            <span aria-hidden="true">–</span>
+          )}
+        </span>
+      )}
       <button
         type="button"
         className={`status s-${t.status}`}
