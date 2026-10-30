@@ -12,6 +12,9 @@ export class FakeStore implements Store {
     planner_breaks: new Map(),
     planner_break_runs: new Map(),
     planner_attendance: new Map(),
+    tasks: new Map(),
+    item_notes: new Map(),
+    xp_ledger: new Map(),
   };
   private sequence = 100;
   writes = 0;
@@ -56,7 +59,7 @@ export class FakeStore implements Store {
 
   async insert(table: Table, values: Record<string, unknown>): Promise<InsertResult> {
     this.writes++;
-    const id = values.id as string;
+    const id = (values.id ?? values.occurrence_key) as string;
     if (this.tables[table].has(id)) return { kind: 'duplicate' };
     const owner = (values.owner_id as string | undefined) ?? this.userId;
     if (owner !== this.userId) throw new Error('42501');
@@ -71,7 +74,7 @@ export class FakeStore implements Store {
       .filter((r) => query.includeDeleted || r.deleted_at_ms == null)
       .filter((r) => Object.entries(query.eq ?? {}).every(([k, v]) => r[k] === v))
       .filter((r) => !query.since || Number(r[query.since.column]) >= query.since.value)
-      .sort((a, b) => a.id.localeCompare(b.id))
+      .sort((a, b) => String(a[query.orderBy ?? 'id']).localeCompare(String(b[query.orderBy ?? 'id'])))
       .slice(query.from, query.to + 1)
       .map((r) => structuredClone(r));
   }

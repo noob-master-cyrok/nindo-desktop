@@ -1,6 +1,15 @@
 import { expect, test, type Page } from '@playwright/test';
 import { MockSupabase } from './mockSupabase';
 
+// These tests work on the Tasks page, which used to be the only page.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('nindo.test.section')) return;
+    localStorage.setItem('nindo.desktop.section', 'tasks');
+    sessionStorage.setItem('nindo.test.section', '1');
+  });
+});
+
 /// Screenshots of the main screens in light and dark, for design reviews.
 /// Run with `SCREENS=1 npx playwright test screens`; they land in
 /// test-results/screens/.
@@ -75,7 +84,7 @@ async function signIn(page: Page, server: MockSupabase) {
   await page.getByLabel('Email', { exact: true }).fill(server.email);
   await page.getByRole('button', { name: 'Send code' }).click();
   await page.getByLabel('Code').fill('123456');
-  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByText('Prepare client deck').first()).toBeVisible();
 }
 

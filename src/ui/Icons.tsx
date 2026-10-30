@@ -278,3 +278,56 @@ export const SkipIcon = (p: P) => (
     <path d="M18 5.5v13" />
   </Svg>
 );
+
+/// Today: the sun rising over the horizon.
+export const SunIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M7 16.5a5 5 0 0 1 10 0M3 19.5h18M12 4.5v3M4.6 9.1l2.1 2.1M19.4 9.1l-2.1 2.1" />
+  </Svg>
+);
+/// Events: a list of dated items.
+export const EventsIcon = (p: P) => (
+  <Svg {...p}>
+    <rect x="3.5" y="4" width="5" height="5" rx="1.5" />
+    <rect x="3.5" y="15" width="5" height="5" rx="1.5" />
+    <path d="M11.5 6.5h9M11.5 17.5h9M11.5 12h6" />
+  </Svg>
+);
+/// Festivals: a diyo (oil lamp) with its flame.
+export const DiyoIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M3.5 13.5h17c-.6 3.6-4 6-8.5 6s-7.9-2.4-8.5-6z" />
+    <path d="M12 10.5c-1.4 0-2.3-1-2.3-2.3 0-1.6 1.6-2.7 2.3-4.7.7 2 2.3 3.1 2.3 4.7 0 1.3-.9 2.3-2.3 2.3z" />
+  </Svg>
+);
+export const PeopleIcon = (p: P) => (
+  <Svg {...p}>
+    <circle cx="9" cy="8.5" r="3.5" />
+    <path d="M2.8 19.5c.6-3.3 3.1-5.3 6.2-5.3s5.6 2 6.2 5.3" />
+    <path d="M15.5 5.3a3.3 3.3 0 0 1 0 6.4M17.6 14.6c1.9.7 3.2 2.4 3.6 4.9" />
+  </Svg>
+);
+export const AlarmIcon = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="13" r="7.5" />
+    <path d="M12 9v4l2.5 1.5M4 4.5l2.5-2M20 4.5l-2.5-2M7 19.5l-1.5 2M17 19.5l1.5 2" />
+  </Svg>
+);
+export const TasksIcon = (p: P) => (
+  <Svg {...p}>
+    <circle cx="6" cy="6.5" r="2.2" />
+    <circle cx="6" cy="17.5" r="2.2" />
+    <path d="M11 6.5h9.5M11 17.5h9.5M5 12h1M11 12h9.5" />
+  </Svg>
+);
+export const ChevronSide = ({ left, ...p }: P & { left?: boolean }) => (
+  <Svg {...p}>
+    <path d={left ? 'M14.5 6l-6 6 6 6' : 'M9.5 6l6 6-6 6'} />
+  </Svg>
+);
+export const BellIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z" />
+    <path d="M10 20.5a2 2 0 0 0 4 0" />
+  </Svg>
+);

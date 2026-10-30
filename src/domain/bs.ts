@@ -43,3 +43,22 @@ export function bsLabel(iso: string, num: (v: string) => string, short = false):
   const name = bsMonthNames[bs.month - 1]!;
   return num(short ? `${bs.day} ${name}` : `${bs.day} ${name} ${bs.year}`);
 }
+
+/// Days in BS [month] of [year], or null outside the table.
+export function bsMonthLength(year: number, month: number): number | null {
+  return bsMonthLengths[year - bsFirstYear]?.[month - 1] ?? null;
+}
+
+/// The AD date (yyyy-mm-dd) of a BS date, or null outside the table or when
+/// the month has fewer days.
+export function fromBs({ year, month, day }: BsDate): string | null {
+  const length = bsMonthLength(year, month);
+  if (length == null || day < 1 || day > length) return null;
+  let days = 0;
+  for (let y = bsFirstYear; y < year; y++) days += bsMonthLengths[y - bsFirstYear]!.reduce((n, v) => n + v, 0);
+  for (let m = 1; m < month; m++) days += bsMonthLengths[year - bsFirstYear]![m - 1]!;
+  return new Date(epoch + (days + day - 1) * dayMs).toISOString().slice(0, 10);
+}
+
+export const bsFirst = bsFirstYear;
+export const bsLast = bsFirstYear + bsMonthLengths.length - 1;

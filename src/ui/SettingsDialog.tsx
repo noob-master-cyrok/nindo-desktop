@@ -8,7 +8,7 @@ import { Segmented } from './Segmented';
 
 /// Desktop settings, kept on this computer: the phone's Appearance, App
 /// colors, Background and Numerals, plus the account.
-export function SettingsDialog({ email, onSignOut, onClose }: { email: string; onSignOut: () => void; onClose: () => void }) {
+export function SettingsDialog({ email, onSignOut, onClose, onExport }: { email: string; onSignOut: () => void; onClose: () => void; onExport?: () => void }) {
   const { settings, update } = useSettings();
   const customAccent = settings.accent.startsWith(customPrefix);
   const customBackground = settings.background.startsWith(customPrefix);
@@ -31,6 +31,24 @@ export function SettingsDialog({ email, onSignOut, onClose }: { email: string; o
   return (
     <Modal title="Settings" onClose={onClose}>
       <div className="stack settings">
+        <section className="set-group" aria-label="Your name">
+          <h3 className="kicker">Your name</h3>
+          <input aria-label="Your name" value={settings.name} maxLength={40} placeholder="Used in the greeting on Today" onChange={(e) => update({ name: e.target.value })} />
+        </section>
+
+        <section className="set-group" aria-label="Calendar first">
+          <h3 className="kicker">Calendar first</h3>
+          <Segmented
+            label="Calendar first"
+            value={settings.calendarFirst}
+            options={[
+              { value: 'BS', label: 'BS first' },
+              { value: 'AD', label: 'AD first' },
+            ]}
+            onChange={(calendarFirst) => update({ calendarFirst })}
+          />
+        </section>
+
         <section className="set-group" aria-label="Appearance">
           <h3 className="kicker">Appearance</h3>
           <Segmented<Mode>
@@ -115,6 +133,18 @@ export function SettingsDialog({ email, onSignOut, onClose }: { email: string; o
             onChange={(numerals) => update({ numerals })}
           />
         </section>
+
+        {onExport && (
+          <section className="set-group" aria-label="Calendar file">
+            <h3 className="kicker">Calendar file</h3>
+            <div className="row">
+              <span className="muted small">Your items as an .ics file for Apple Calendar, Google Calendar or Outlook.</span>
+              <button className="secondary push" onClick={onExport}>
+                Export…
+              </button>
+            </div>
+          </section>
+        )}
 
         <section className="set-group" aria-label="Account">
           <h3 className="kicker">Account</h3>

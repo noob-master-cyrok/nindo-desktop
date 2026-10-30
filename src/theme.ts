@@ -13,9 +13,13 @@ export interface Settings {
   /// A background id, or `custom:RRGGBB`. Light mode only, as on the phone.
   background: string;
   numerals: Numerals;
+  /// The name in the greeting (the phone keeps its own).
+  name: string;
+  /// Which calendar leads dates and the month grid.
+  calendarFirst: 'AD' | 'BS';
 }
 
-export const defaultSettings: Settings = { mode: 'system', accent: 'raspberry', background: 'white', numerals: 'latin' };
+export const defaultSettings: Settings = { mode: 'system', accent: 'raspberry', background: 'white', numerals: 'latin', name: '', calendarFirst: 'BS' };
 
 type Tokens = Record<string, string>;
 
@@ -268,6 +272,8 @@ export function loadSettings(): Settings {
       accent: typeof v.accent === 'string' ? v.accent : defaultSettings.accent,
       background: typeof v.background === 'string' ? v.background : defaultSettings.background,
       numerals: v.numerals === 'devanagari' ? 'devanagari' : 'latin',
+      name: typeof v.name === 'string' ? v.name.slice(0, 40) : '',
+      calendarFirst: v.calendarFirst === 'AD' ? 'AD' : 'BS',
     };
   } catch {
     return defaultSettings;

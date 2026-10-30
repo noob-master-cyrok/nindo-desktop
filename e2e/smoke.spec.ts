@@ -1,6 +1,15 @@
 import { expect, test } from '@playwright/test';
 import { MockSupabase } from './mockSupabase';
 
+// These tests work on the Tasks page, which used to be the only page.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('nindo.test.section')) return;
+    localStorage.setItem('nindo.desktop.section', 'tasks');
+    sessionStorage.setItem('nindo.test.section', '1');
+  });
+});
+
 const ORIGIN = 'https://wvqutuvvbnrnjmjokynf.supabase.co';
 const TASK_ID = 'a1b2c3d4-0000-4000-8000-000000000001';
 const PROJECT_ID = 'a1b2c3d4-0000-4000-8000-0000000000aa';
@@ -307,7 +316,7 @@ test('the sidebar hides, peeks on hover, and stays hidden after a reload', async
   seed(server);
   await server.install(page);
   await signIn(page, server);
-  const lists = page.getByRole('navigation', { name: 'Task lists' });
+  const lists = page.getByRole('navigation', { name: 'Nindo' });
   const work = lists.getByRole('button', { name: /^Work/ });
 
   await page.getByRole('button', { name: 'Hide sidebar' }).click();

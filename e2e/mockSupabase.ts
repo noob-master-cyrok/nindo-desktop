@@ -18,6 +18,9 @@ export class MockSupabase {
     planner_breaks: new Map(),
     planner_break_runs: new Map(),
     planner_attendance: new Map(),
+    tasks: new Map(),
+    item_notes: new Map(),
+    xp_ledger: new Map(),
   };
   private revision = 1000;
 
@@ -119,11 +122,12 @@ export class MockSupabase {
     }
     if (method === 'POST') {
       const values = request.postDataJSON() as Record<string, unknown>;
-      if (table.has(values.id as string)) {
+      const key = (values.id ?? values.occurrence_key) as string;
+      if (table.has(key)) {
         return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ code: '23505', message: 'duplicate key' }) });
       }
       const row = this.stamp({ ...values, owner_id: this.userId });
-      table.set(row.id as string, row);
+      table.set(key, row);
       return this.reply(route, 201, [row], wantsObject);
     }
     if (method === 'PATCH') {

@@ -35,6 +35,24 @@ The script needs a git remote `desktop-site` for that repository. It adds one co
 
 ## What it does
 
+It has every place of the phone app in the sidebar: **Today, Calendar, Events, Tasks, Festivals, Search, People, Alarms & timer** and Settings. Hiding the sidebar (`[`) leaves a rail with one icon per place (tooltip, current place marked, a live dot while a timer runs). Keys 1–5 jump to Today, Calendar, Events, Tasks and Festivals; / searches.
+
+### Calendar side (items in `public.tasks`, notes in `public.item_notes`)
+
+- **Today:** greeting with your name, the date hero (BS or AD first, the other calendar, the tithi; click to swap), today's festival, Needs attention (overdue, critical within 7 days), today's items with a now-line, today's planner tasks, and upcoming birthdays, events, bills and festivals.
+- **Calendar:** Year, Month, Week and Events views in BS or AD; cells carry both dates, the tithi, festivals, holiday red (Saturdays too) and item dots; click the title to jump to any month (BS 2000–2100); the day card lists the day's items and festivals.
+- **Events:** Today, Upcoming (by day), Overdue and Inbox tiles; Completed behind a toggle.
+- **Items:** add and edit every kind (reminder, task, birthday, bill, renewal, appointment, event, household, repayment, custom) with date, time, repeat (daily, weekly on days, monthly or yearly in AD or BS, every N, until a date or N times), alerts, category, urgency, description, steps and the notes log. **Done** moves a repeating item to its next date (missed dates passed over) and awards 10 XP once per occurrence, at most 100 a day, as the phone does. **Skip this time**, **Snooze**, **Duplicate**, **Delete** (held back six seconds for Undo, because deletes are final on the server).
+- **Festivals:** a year of named days (Ekadashis, Purnimas, Aunsis and festivals by lunar date) and the Kathmandu Metropolitan City list for BS 2083 with holidays; a festival page with both names, dates, tithi, source, notes and Remind me.
+- **Search:** items (name, description, steps, notes, category, type), planner tasks and festivals; whole phrase first, then partial matches.
+- **Settings:** your name, BS or AD first, and an `.ics` export for a date range.
+
+The tithi, lunar month and named-day data (`src/domain/calendarData.json`, BS 2057–2100) is written by the phone's own code: `flutter test tool/desktop/calendar_data_test.dart` from the repository root. It loads on first use, apart from the main bundle.
+
+**Phone-only, and why:** alarms and the alarm-style timer (they ring through the phone's alarm system and never sync; the desktop has a simple countdown that rings while it is open), People (kept on the phone, never uploaded), Google calendars (the Google sign-in and imported events live on the phone), home-screen widgets and My World. Lunar-date repeats (every Ekadashi, yearly on a tithi) show on their stored date; Done and Skip for them work from the phone, which follows the sunrise tithi.
+
+### Tasks side
+
 It follows the phone's Tasks tab and the Nindo design system (`docs/replicate/03-design-system.md`, tokens from `lib/app/theme/`). The audit behind this is in `docs/parity-audit-2026-10-29.md`.
 
 - **Sign in:** with the code from the email, or the email's sign-in link. The site URL must be in Supabase Auth → Redirect URLs. The desktop never creates accounts (`shouldCreateUser: false`). "Send code" waits 60 seconds between requests. The signed-in email is shown at the bottom of the sidebar.
@@ -54,7 +72,7 @@ It follows the phone's Tasks tab and the Nindo design system (`docs/replicate/03
 - **Breaks:** Take a break pauses every timer and covers the page until End break; the break and its run sync to the phone.
 - **Attendance:** Check in and Check out once a day, or set any day by hand.
 - **This week:** worked, break and at-work hours per day.
-- **Keys:** N adds a task, / searches, Escape closes the task or the full-screen clock.
+- **Keys:** N adds a task (an item outside Tasks), / searches, 1–5 change place, [ hides the sidebar, Escape closes the open pane or the full-screen clock.
 - **New project**, with the phone's colours, and **CSV export** with spreadsheet formula protection.
 - The list refreshes when the window gets focus and with Refresh.
 
@@ -77,7 +95,6 @@ Every save:
 - **Not instant.** The phone pulls when the app opens or resumes, shortly after a local change, after sign-in, or on "Sync now".
 - **Each device uses its own clock** for `updated_at_ms`.
 - **Running clocks are per device.** A timer started here does not show as running on the phone (and the other way round); the time it logs does sync. Files, photos and daily-planning settings stay on the phone.
-- **Dates are AD only.** The phone can show BS first; that needs its verified BS tables ported here.
 - **English only.** The phone's Nepali text is not here yet; Numerals १२३ works.
 
 ## Tests

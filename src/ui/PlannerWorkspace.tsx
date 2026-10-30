@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { PlannerRepo, SaveResult } from '../data/plannerRepo';
 import {
   decodeLabels,
@@ -40,6 +40,17 @@ import { Toast, type ToastMessage } from './Toast';
 import { BreakCover, FullClock } from './Clocks';
 import { useTimers } from './useTimers';
 import { clockText, runningTimers, timerElapsed } from '../domain/clock';
+import type { CompleteOutcome, ItemsRepo } from '../data/itemsRepo';
+import type { Festival } from '../domain/calendar';
+import { entriesBetween } from '../domain/agenda';
+import { addDays } from '../domain/dates';
+import { toIcs } from '../domain/ics';
+import { isDone, kindLabel, type Item } from '../domain/item';
+import { CalendarScreen, type CalView } from './CalendarScreen';
+import { ItemPanel } from './ItemPanel';
+import { AlarmsScreen, EventsScreen, FestivalPanel, FestivalsScreen, PeopleScreen, SearchScreen, TodayScreen, type LifeProps } from './LifeScreens';
+import { useItems, useNepaliCalendar } from './useItems';
+import { AlarmIcon, Calendar, DiyoIcon, EventsIcon, PeopleIcon, SunIcon, TasksIcon, Timer } from './Icons';
 
 /// The phone's status-circle tap: to do → in progress → done → to do.
 export function nextStatus(status: Status): Status {
@@ -80,6 +91,39 @@ function rememberView(view: View) {
   }
 }
 
+export type Section = 'today' | 'calendar' | 'events' | 'tasks' | 'festivals' | 'search' | 'people' | 'alarms';
+const sectionKey = 'nindo.desktop.section';
+const sectionList: Section[] = ['today', 'calendar', 'events', 'tasks', 'festivals', 'search', 'people', 'alarms'];
+
+function lastSection(): Section {
+  try {
+    const v = localStorage.getItem(sectionKey) as Section | null;
+    return v && sectionList.includes(v) ? v : 'today';
+  } catch {
+    return 'today';
+  }
+}
+
+function remember(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Private windows may refuse; the choice then lasts for this visit.
+  }
+}
+
+/// Every place in the sidebar, in the phone's order, with its rail icon.
+const sections: { id: Section; label: string; icon: (size: number) => ReactNode; key?: string }[] = [
+  { id: 'today', label: 'Today', icon: (s) => <SunIcon size={s} />, key: '1' },
+  { id: 'calendar', label: 'Calendar', icon: (s) => <Calendar size={s} />, key: '2' },
+  { id: 'events', label: 'Events', icon: (s) => <EventsIcon size={s} />, key: '3' },
+  { id: 'tasks', label: 'Tasks', icon: (s) => <TasksIcon size={s} />, key: '4' },
+  { id: 'festivals', label: 'Festivals', icon: (s) => <DiyoIcon size={s} />, key: '5' },
+  { id: 'search', label: 'Search', icon: (s) => <Search size={s} />, key: '/' },
+  { id: 'people', label: 'People', icon: (s) => <PeopleIcon size={s} /> },
+  { id: 'alarms', label: 'Alarms & timer', icon: (s) => <AlarmIcon size={s} /> },
+];
+
 function sidebarWasHidden(): boolean {
   try {
     return localStorage.getItem(sidebarKey) === 'hidden';
@@ -97,8 +141,18 @@ function rememberSidebar(hidden: boolean) {
   }
 }
 
-export function PlannerWorkspace({ email, planner, onSignOut }: { email: string; planner: PlannerRepo; onSignOut: () => void }) {
+export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }: { email: string; planner: PlannerRepo; items: ItemsRepo; onSignOut: () => void }) {
   const { num } = useSettings();
+  const [section, setSectionState] = useState<Section>(lastSection);
+  const [calView, setCalView] = useState<CalView>('month');
+  const [itemSel, setItemSel] = useState<{ id: string } | { defaults: { date?: string; kind?: string } } | null>(null);
+  const [itemKey, setItemKey] = useState(0);
+  const [festSel, setFestSel] = useState<Festival | null>(null);
+  const [searchKey, setSearchKey] = useState(0);
+  const [exportOpen, setExportOpen] = useState(false);
+  const life = useItems(itemsRepo);
+  const cal = useNepaliCalendar();
+  const pendingDeletes = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const [tasks, setTasks] = useState<PlannerTask[] | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
@@ -120,6 +174,7 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
   const [quick, setQuick] = useState('');
   const [newProject, setNewProject] = useState<{ name: string; color: number } | null>(null);
   const [dialog, setDialog] = useState<'filter' | 'settings' | null>(null);
+
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [fullClock, setFullClock] = useState(false);
   const [sideHidden, setSideHidden] = useState(sidebarWasHidden);
@@ -166,6 +221,9 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
     });
   }, []);
 
+  const goRef = useRef<(s: Section) => void>(() => {});
+  const newItemRef = useRef<() => void>(() => {});
+  const closePaneRef = useRef<() => void>(() => {});
   /// Closes the task, saving edits first so a close never loses them.
   const closeTask = useCallback(async () => {
     const save = saveOpenTask.current;
@@ -178,14 +236,19 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
       const target = e.target as HTMLElement;
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable;
       if (document.querySelector('dialog[open]')) return;
-      if (e.key === 'Escape' && !typing) closeTask();
+      if (e.key === 'Escape' && !typing) closePaneRef.current();
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === 'n' || e.key === 'N') {
         e.preventDefault();
-        quickRef.current?.focus();
+        if (quickRef.current) quickRef.current.focus();
+        else newItemRef.current();
       } else if (e.key === '/') {
         e.preventDefault();
-        searchRef.current?.focus();
+        if (searchRef.current) searchRef.current.focus();
+        else goRef.current('search');
+      } else if (/^[1-5]$/.test(e.key)) {
+        e.preventDefault();
+        goRef.current(sections.find((x) => x.key === e.key)!.id);
       } else if (e.key === '[') {
         e.preventDefault();
         toggleSidebar();
@@ -248,9 +311,147 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
     // Opening another task closes this one, which saves its edits.
     const save = saveOpenTask.current;
     if (save && (id !== selected || id === 'new') && !(await save())) return;
+    setItemSel(null);
+    setFestSel(null);
     setSelected(id);
     setNewTitle(title);
     setPanelKey(id === 'new' ? `new-${Date.now()}` : id);
+  }
+
+  // Calendar items, festivals and the places in the sidebar ---------------
+
+  /// Closes whatever is open beside the page (a task saves first).
+  async function closePane() {
+    if (selected) await closeTask();
+    setItemSel(null);
+    setFestSel(null);
+  }
+  closePaneRef.current = closePane;
+
+  async function go(next: Section) {
+    if (next !== 'tasks' && selected) {
+      const save = saveOpenTask.current;
+      if (save && !(await save())) return;
+      setSelected(null);
+    }
+    remember(sectionKey, next);
+    setSectionState(next);
+    if (next === 'search') setSearchKey((k) => k + 1);
+  }
+  goRef.current = go;
+
+  async function openItem(id: string) {
+    const save = saveOpenTask.current;
+    if (selected && save && !(await save())) return;
+    setSelected(null);
+    setFestSel(null);
+    setItemSel({ id });
+    setItemKey((k) => k + 1);
+  }
+
+  async function newItem(defaults: { date?: string; kind?: string } = {}) {
+    const save = saveOpenTask.current;
+    if (selected && save && !(await save())) return;
+    setSelected(null);
+    setFestSel(null);
+    setItemSel({ defaults });
+    setItemKey((k) => k + 1);
+  }
+  newItemRef.current = () => newItem({ date: today });
+
+  async function openFestival(f: Festival) {
+    const save = saveOpenTask.current;
+    if (selected && save && !(await save())) return;
+    setSelected(null);
+    setItemSel(null);
+    setFestSel(f);
+  }
+
+  async function openTaskFrom(id: string) {
+    await go('tasks');
+    setScope('all');
+    open(id);
+  }
+
+  function completed(outcome: CompleteOutcome, item: Item) {
+    if (outcome.result.status !== 'saved') return;
+    life.replace(outcome.result.row);
+    const xp = outcome.xp === 'awarded' ? ' +10 XP' : '';
+    if (outcome.nextDue) say(`Done.${xp} Next: ${outcome.nextDue}.`);
+    else
+      say(`“${item.title}” done.${xp}`, {
+        label: 'Undo',
+        run: () =>
+          void itemsRepo.reopen(outcome.result.status === 'saved' ? outcome.result.row : item).then((r) => {
+            if (r.status === 'saved') life.replace(r.row);
+          }),
+      });
+  }
+
+  async function doneItem(item: Item) {
+    try {
+      const outcome = await itemsRepo.complete(item, today);
+      if (outcome.result.status === 'invalid') say(outcome.result.problems.join(' '));
+      else if (outcome.result.status === 'conflict') {
+        life.replace(outcome.result.current);
+        say(`“${outcome.result.current.title}” changed on your phone. Try again.`);
+      } else completed(outcome, item);
+    } catch (e) {
+      say(e instanceof Error ? e.message : 'Something went wrong. Try again.');
+    }
+  }
+
+  /// Deletes on the server only after the Undo moment has passed, because a
+  /// deleted item can never come back.
+  function deleteItem(item: Item) {
+    life.hide(item.id);
+    setItemSel(null);
+    const timer = setTimeout(() => {
+      pendingDeletes.current.delete(item.id);
+      itemsRepo.remove(item).then(
+        (r) => r.status === 'conflict' && (life.replace(r.current), say(`“${item.title}” changed on your phone, so it was kept.`)),
+        () => (life.replace(item), say('Could not delete. Check your connection.')),
+      );
+    }, 6500);
+    pendingDeletes.current.set(item.id, timer);
+    say(`${kindLabel(item.kind)} deleted`, {
+      label: 'Undo',
+      run: () => {
+        clearTimeout(pendingDeletes.current.get(item.id));
+        pendingDeletes.current.delete(item.id);
+        life.replace(item);
+      },
+    });
+  }
+
+  const lifeProps: LifeProps = {
+    items: life.items,
+    notes: life.notes,
+    cal,
+    today,
+    selectedItem: itemSel && 'id' in itemSel ? itemSel.id : null,
+    error: life.error,
+    onOpenItem: openItem,
+    onNewItem: newItem,
+    onDone: doneItem,
+    onOpenFestival: openFestival,
+  };
+  const openItemRow = itemSel && 'id' in itemSel ? (life.items?.find((i) => i.id === itemSel.id) ?? null) : null;
+  const paneOpen = !!selected || !!itemSel || !!festSel;
+  const todayCount = life.items ? entriesBetween(life.items, today, today).filter((e) => !isDone(e.item)).length : 0;
+  const overdueCount = life.items ? life.items.filter((i) => !isDone(i) && !i.undated && i.due_date_ad < today).length : 0;
+  const timerLive = liveIds.length > 0 || !!timers.state.focus;
+
+  function exportIcs(from: string, to: string) {
+    const entries = entriesBetween(life.items ?? [], from, to).map((e) => ({ item: e.item, date: e.date }));
+    const url = URL.createObjectURL(new Blob([toIcs(entries)], { type: 'text/calendar;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `nindo-${from}-to-${to}.ics`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    say(`Exported ${entries.length} ${entries.length === 1 ? 'date' : 'dates'}.`);
+    setExportOpen(false);
   }
 
   /// Handles a write's result for a task in the list.
@@ -374,25 +575,70 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
   const narrowed = filterActive(filter) || sort !== 'manual';
 
   return (
-    <div className={['app', selected && 'with-task', sideHidden && 'side-hidden', noPeek && 'no-peek'].filter(Boolean).join(' ')}>
+    <div className={['app', paneOpen && 'with-task', sideHidden && 'side-hidden', noPeek && 'no-peek'].filter(Boolean).join(' ')}>
       {sideHidden && (
-        <div className="side-rail" onPointerEnter={() => setNoPeek(false)}>
-          <button className="icon-button side-toggle" aria-label="Show sidebar" title="Show sidebar ([)" aria-expanded="false" onClick={toggleSidebar}>
+        <nav className="side-rail" aria-label="Places">
+          <button className="icon-button side-toggle" aria-label="Show sidebar" title="Show sidebar ([)" aria-expanded="false" onClick={toggleSidebar} onPointerEnter={() => setNoPeek(false)}>
             <SidebarIcon size={20} />
           </button>
-        </div>
+          <ul className="rail-list">
+            {sections.map((x) => (
+              <li key={x.id}>
+                <button
+                  className={section === x.id ? 'rail-button active' : 'rail-button'}
+                  aria-label={x.label}
+                  aria-current={section === x.id ? 'page' : undefined}
+                  data-tip={x.key ? `${x.label} · ${x.key}` : x.label}
+                  onClick={() => go(x.id)}
+                >
+                  {x.icon(20)}
+                  {x.id === 'tasks' && timerLive && <span className="rail-live" aria-hidden="true" />}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {timerLive && (
+            <button
+              className="rail-button rail-timer"
+              aria-label={`Timer running: ${timers.state.focus ? timers.state.focus.title : (all.find((t) => t.id === liveIds[0])?.title ?? 'task')}. Open the full-screen clock`}
+              data-tip={`${timers.state.focus ? (timers.state.focus.phase === 'focus' ? 'Focus round' : 'Rest') : 'Running'} · ${clockText(timers.state.focus ? timers.state.focus.endsAt - timers.now : Math.max(...liveIds.map((id) => timerElapsed(timers.state.timers[id], timers.now))))}`}
+              onClick={() => setFullClock(true)}
+            >
+              <Timer size={20} />
+              <span className="rail-live" aria-hidden="true" />
+            </button>
+          )}
+          <button className="rail-button rail-foot" aria-label="Settings" data-tip="Settings" onClick={() => setDialog('settings')}>
+            <Gear size={20} />
+          </button>
+        </nav>
       )}
-      <nav className="sidebar" aria-label="Task lists">
+      <nav className="sidebar" aria-label="Nindo">
         <div className="side-top">
-          <div className="wordmark">
-            Nindo <span className="kicker">Tasks</span>
-          </div>
+          <div className="wordmark">Nindo</div>
           {!sideHidden && (
             <button className="icon-button small side-toggle" aria-label="Hide sidebar" title="Hide sidebar ([)" aria-expanded="true" onClick={toggleSidebar}>
               <SidebarIcon />
             </button>
           )}
         </div>
+        <ul className="nav-list">
+          {sections.map((x) => (
+            <li key={x.id}>
+              <button className={section === x.id ? 'nav active' : 'nav'} aria-current={section === x.id ? 'page' : undefined} onClick={() => go(x.id)} title={x.key ? `${x.label} (${x.key})` : x.label}>
+                <span className="nav-name">
+                  {x.icon(18)} {x.label}
+                </span>
+                {x.id === 'today' && todayCount > 0 && <span className="count">{num(todayCount)}</span>}
+                {x.id === 'events' && overdueCount > 0 && <span className="count attn-ink">{num(overdueCount)}</span>}
+                {x.id === 'tasks' && timerLive && <span className="rail-live inline" aria-label="Timer running" />}
+              </button>
+            </li>
+          ))}
+        </ul>
+        {section === 'tasks' && (
+        <>
+        <h2 className="kicker side-head">Task lists</h2>
         <ul className="nav-list">
           {scopes.map(({ scope: s, label }) => (
             <li key={label}>
@@ -427,6 +673,8 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
             </button>
           </li>
         </ul>
+        </>
+        )}
         <div className="side-foot">
           <button className="nav" onClick={() => setDialog('settings')}>
             <span className="nav-name">
@@ -439,6 +687,25 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
         </div>
       </nav>
 
+      {section !== 'tasks' && (
+        <main className={`list-pane life-pane ${section}-pane`} onPointerEnter={() => setNoPeek(false)}>
+          {section === 'today' && <TodayScreen life={lifeProps} tasks={all} onOpenTasks={() => go('tasks')} onOpenTask={openTaskFrom} />}
+          {section === 'calendar' && <CalendarScreen life={lifeProps} view={calView} onView={setCalView} />}
+          {section === 'events' && <EventsScreen life={lifeProps} />}
+          {section === 'festivals' && <FestivalsScreen life={lifeProps} />}
+          {section === 'search' && <SearchScreen life={lifeProps} tasks={all} onOpenTask={openTaskFrom} focusKey={searchKey} />}
+          {section === 'people' && <PeopleScreen />}
+          {section === 'alarms' && <AlarmsScreen />}
+          {(liveIds.length > 0 || timers.state.focus) && section !== 'alarms' && (
+            <button className="running-chip" onClick={() => setFullClock(true)} aria-label="Running timer, open the full-screen clock">
+              <span className="pulse" aria-hidden="true" />
+              {timers.state.focus ? timers.state.focus.title : (all.find((t) => t.id === liveIds[0])?.title ?? 'Timer')}
+              <b>{num(clockText(timers.state.focus ? timers.state.focus.endsAt - timers.now : Math.max(...liveIds.map((id) => timerElapsed(timers.state.timers[id], timers.now)))))}</b>
+            </button>
+          )}
+        </main>
+      )}
+      {section === 'tasks' && (
       <main className="list-pane" onPointerEnter={() => setNoPeek(false)}>
         <header className="hero">
           <div className="hero-date" role="group" aria-label={`Today, ${heroDate.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}${bsToday ? `, ${bsToday}` : ''}`}>
@@ -717,8 +984,55 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
           Changes reach your phone the next time it opens or syncs. Timers run on this computer; the time they log syncs. Files and photos stay on your phone.
         </p>
       </main>
+      )}
 
-      <aside className={selected ? 'detail-pane open' : 'detail-pane'} aria-label="Task" hidden={!selected}>
+      <aside className={paneOpen ? 'detail-pane open' : 'detail-pane'} aria-label={selected ? 'Task' : itemSel ? 'Item' : 'Festival'} hidden={!paneOpen}>
+        {itemSel && ('defaults' in itemSel || openItemRow) && (
+          <ItemPanel
+            key={itemKey}
+            item={openItemRow}
+            defaults={'defaults' in itemSel ? itemSel.defaults : {}}
+            repo={itemsRepo}
+            notes={life.notes}
+            say={say}
+            onSaved={(row) => {
+              life.replace(row);
+              if (row.completed_at_ms != null || 'defaults' in itemSel) setItemSel({ id: row.id });
+              setItemKey((k) => k + 1);
+            }}
+            onCompleted={(outcome, item) => {
+              completed(outcome, item);
+              setItemKey((k) => k + 1);
+            }}
+            onDelete={deleteItem}
+            onDuplicated={(row) => {
+              life.replace(row);
+              openItem(row.id);
+              say('Duplicated.');
+            }}
+            onNotes={life.load}
+            onClose={() => setItemSel(null)}
+          />
+        )}
+        {festSel && (
+          <FestivalPanel
+            festival={festSel}
+            cal={cal}
+            notes={life.notes}
+            onClose={() => setFestSel(null)}
+            onRemind={() => newItem({ date: festSel.iso, kind: 'event' })}
+            onAddNote={async (body) => {
+              if (!festSel.noteId) return false;
+              const r = await itemsRepo.addNote('festival', festSel.noteId, body).catch(() => null);
+              if (r?.status === 'saved') {
+                life.setNotes((n) => [...n, r.row]);
+                return true;
+              }
+              say(r?.status === 'invalid' ? r.problems.join(' ') : 'Could not save the note. Try again.');
+              return false;
+            }}
+          />
+        )}
         {(selected === 'new' || current) && (
           <TaskPanel
             key={panelKey}
@@ -768,7 +1082,18 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
           }}
         />
       )}
-      {dialog === 'settings' && <SettingsDialog email={email} onSignOut={onSignOut} onClose={() => setDialog(null)} />}
+      {dialog === 'settings' && (
+        <SettingsDialog
+          email={email}
+          onSignOut={onSignOut}
+          onClose={() => setDialog(null)}
+          onExport={() => {
+            setDialog(null);
+            setExportOpen(true);
+          }}
+        />
+      )}
+      {exportOpen && <ExportDialog today={today} onClose={() => setExportOpen(false)} onExport={exportIcs} />}
 
       {newProject && (
         <Modal title="New project" onClose={() => setNewProject(null)}>
@@ -824,5 +1149,43 @@ export function PlannerWorkspace({ email, planner, onSignOut }: { email: string;
       {fullClock && <FullClock timers={timers} tasks={all} onClose={() => setFullClock(false)} />}
       <Toast toast={toast} onDone={hideToast} />
     </div>
+  );
+}
+
+/// Picks the dates for a calendar (.ics) file, as the phone's export does.
+function ExportDialog({ today, onClose, onExport }: { today: string; onClose: () => void; onExport: (from: string, to: string) => void }) {
+  const [from, setFrom] = useState(today);
+  const [to, setTo] = useState(addDays(today, 365));
+  return (
+    <Modal title="Export calendar file" onClose={onClose}>
+      <form
+        className="stack"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (from <= to) onExport(from, to);
+        }}
+      >
+        <h2>Export calendar file</h2>
+        <p className="muted small">Every dated item from these days, repeats written out, for Apple Calendar, Google Calendar or Outlook.</p>
+        <div className="grid2">
+          <label className="field">
+            <span className="kicker">From</span>
+            <input type="date" value={from} required onChange={(e) => setFrom(e.target.value)} />
+          </label>
+          <label className="field">
+            <span className="kicker">To</span>
+            <input type="date" value={to} min={from} required onChange={(e) => setTo(e.target.value)} />
+          </label>
+        </div>
+        <div className="row end">
+          <button type="button" className="secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="primary" disabled={from > to}>
+            Download .ics
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }

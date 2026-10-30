@@ -9,7 +9,10 @@ export type Table =
   | 'planner_sessions'
   | 'planner_breaks'
   | 'planner_break_runs'
-  | 'planner_attendance';
+  | 'planner_attendance'
+  | 'tasks'
+  | 'item_notes'
+  | 'xp_ledger';
 
 export type Row = Record<string, unknown> & { id: string; revision: number };
 
@@ -21,6 +24,8 @@ export interface ListQuery {
   /// Only rows whose [column] is at least [value] (for example today's history).
   since?: { column: string; value: number };
   includeDeleted?: boolean;
+  /// Sort column; `id` unless the table has none (xp_ledger).
+  orderBy?: string;
   from: number;
   to: number;
 }
