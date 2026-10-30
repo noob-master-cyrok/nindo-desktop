@@ -92,6 +92,17 @@ function rememberView(view: View) {
 }
 
 export type Section = 'today' | 'calendar' | 'events' | 'tasks' | 'festivals' | 'search' | 'people' | 'alarms';
+/// How far each scroll key moves the page when nothing has focus.
+const scrollKeys: Record<string, (page: HTMLElement) => number> = {
+  ArrowDown: () => 40,
+  ArrowUp: () => -40,
+  PageDown: (p) => p.clientHeight * 0.9,
+  PageUp: (p) => -p.clientHeight * 0.9,
+  ' ': (p) => p.clientHeight * 0.9,
+  Home: (p) => -p.scrollHeight,
+  End: (p) => p.scrollHeight,
+};
+
 const sectionKey = 'nindo.desktop.section';
 const sectionList: Section[] = ['today', 'calendar', 'events', 'tasks', 'festivals', 'search', 'people', 'alarms'];
 
@@ -149,6 +160,7 @@ export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }
   const [itemKey, setItemKey] = useState(0);
   const [festSel, setFestSel] = useState<Festival | null>(null);
   const [searchKey, setSearchKey] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
   const [exportOpen, setExportOpen] = useState(false);
   const life = useItems(itemsRepo);
   const cal = useNepaliCalendar();
@@ -184,6 +196,7 @@ export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }
   const saveOpenTask = useRef<(() => Promise<boolean>) | null>(null);
   const quickRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
 
   const say = useCallback((text: string, action?: ToastMessage['action']) => setToast({ id: Date.now(), text, action }), []);
   const hideToast = useCallback(() => setToast(null), []);
@@ -231,13 +244,28 @@ export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }
   }, []);
 
   useEffect(() => {
-    // Desktop keys: N new task, / search, [ sidebar, Escape closes the task.
+    // Desktop keys: N new task, / search, ⌘K or Ctrl+K search anywhere, [ sidebar, Escape closes the task.
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable;
       if (document.querySelector('dialog[open]')) return;
+      // ⌘K / Ctrl+K: search everything, from anywhere, even while typing.
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        goRef.current('search');
+        return;
+      }
       if (e.key === 'Escape' && !typing) closePaneRef.current();
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      // With nothing focused the window would get the scroll keys, but only
+      // the page scrolls, so hand it the keys.
+      const page = mainRef.current;
+      if (page && target === document.body && scrollKeys[e.key]) {
+        e.preventDefault();
+        page.focus({ preventScroll: true });
+        page.scrollBy({ top: scrollKeys[e.key]!(page), behavior: 'smooth' });
+        return;
+      }
       if (e.key === 'n' || e.key === 'N') {
         e.preventDefault();
         if (quickRef.current) quickRef.current.focus();
@@ -337,6 +365,8 @@ export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }
     remember(sectionKey, next);
     setSectionState(next);
     if (next === 'search') setSearchKey((k) => k + 1);
+    // The page takes the keys, so Page Down and the arrows scroll it, not the sidebar.
+    else requestAnimationFrame(() => mainRef.current?.focus({ preventScroll: true }));
   }
   goRef.current = go;
 
@@ -688,12 +718,12 @@ export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }
       </nav>
 
       {section !== 'tasks' && (
-        <main className={`list-pane life-pane ${section}-pane`} onPointerEnter={() => setNoPeek(false)}>
+        <main key={section} ref={mainRef} tabIndex={-1} className={`list-pane life-pane ${section}-pane`} onPointerEnter={() => setNoPeek(false)}>
           {section === 'today' && <TodayScreen life={lifeProps} tasks={all} onOpenTasks={() => go('tasks')} onOpenTask={openTaskFrom} />}
           {section === 'calendar' && <CalendarScreen life={lifeProps} view={calView} onView={setCalView} />}
           {section === 'events' && <EventsScreen life={lifeProps} />}
           {section === 'festivals' && <FestivalsScreen life={lifeProps} />}
-          {section === 'search' && <SearchScreen life={lifeProps} tasks={all} onOpenTask={openTaskFrom} focusKey={searchKey} />}
+          {section === 'search' && <SearchScreen life={lifeProps} tasks={all} onOpenTask={openTaskFrom} focusKey={searchKey} query={searchQuery} onQuery={setSearchQuery} />}
           {section === 'people' && <PeopleScreen />}
           {section === 'alarms' && <AlarmsScreen />}
           {(liveIds.length > 0 || timers.state.focus) && section !== 'alarms' && (
@@ -706,7 +736,7 @@ export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }
         </main>
       )}
       {section === 'tasks' && (
-      <main className="list-pane" onPointerEnter={() => setNoPeek(false)}>
+      <main key="tasks" ref={mainRef} tabIndex={-1} className="list-pane" onPointerEnter={() => setNoPeek(false)}>
         <header className="hero">
           <div className="hero-date" role="group" aria-label={`Today, ${heroDate.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}${bsToday ? `, ${bsToday}` : ''}`}>
             <span className="hero-day" aria-hidden="true">

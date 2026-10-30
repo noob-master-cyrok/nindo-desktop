@@ -129,6 +129,11 @@ export class NepaliCalendar {
     return out.sort((a, b) => a.iso.localeCompare(b.iso) || Number(b.holiday) - Number(a.holiday));
   }
 
+  /// Every festival, by date.
+  all(): Festival[] {
+    return [...this.byIso.keys()].sort().flatMap((iso) => this.byIso.get(iso)!);
+  }
+
   /// Every festival whose English or Nepali name contains [query].
   search(query: string): Festival[] {
     const q = query.trim().toLowerCase();

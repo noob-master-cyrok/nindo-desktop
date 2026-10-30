@@ -55,7 +55,19 @@ export class MockSupabase {
   }
 
   async install(page: Page) {
-    await page.route(`${this.origin}/**`, (route) => this.handle(route));
+    // WebKit checks CORS on fulfilled responses; Chrome does not.
+    const cors = {
+      'access-control-allow-origin': '*',
+      'access-control-allow-headers': '*',
+      'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+      'access-control-expose-headers': '*',
+    };
+    await page.route(`${this.origin}/**`, (route) =>
+      this.handle({
+        request: () => route.request(),
+        fulfill: (o: Parameters<Route['fulfill']>[0]) => route.fulfill({ ...o, headers: { ...cors, ...o?.headers } }),
+      } as Route),
+    );
   }
 
   private filters(url: URL) {

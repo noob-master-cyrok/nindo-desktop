@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { Note } from '../data/itemsRepo';
 import { byDay, entriesBetween, type Entry } from '../domain/agenda';
 import { lunarLabel, statusLabel, tithiName, type Festival, type NepaliCalendar } from '../domain/calendar';
 import { addDays } from '../domain/dates';
-import { compareItems, isCritical, isDone, kindLabel, type Item } from '../domain/item';
+import { compareItems, isCritical, isDone, type Item } from '../domain/item';
 import { isClosed, isOverdue as taskOverdue, type PlannerTask } from '../domain/planner';
-import { search, type SearchDoc, type SearchHit } from '../domain/search';
+import { buildSearchDocs, fieldLabels, highlightRanges, search, searchPageSize, searchSnippet, type SearchDoc, type SearchHit } from '../domain/search';
 import { useSettings } from '../settings';
 import { useDates } from './dateText';
-import { AlarmIcon, Close, DiyoIcon, EventsIcon, PeopleIcon, Plus, Search as SearchIcon, TasksIcon } from './Icons';
+import { AlarmIcon, ChevronSide, Close, DiyoIcon, EventsIcon, PeopleIcon, Plus, Search as SearchIcon, TasksIcon } from './Icons';
 import { FestivalRow, ItemRow } from './ItemRow';
 import { Segmented } from './Segmented';
 
@@ -166,12 +166,12 @@ export function TodayScreen({ life, tasks, onOpenTasks, onOpenTask }: { life: Li
               ) : (
                 todays.map((e, i) => (
                   <div key={`${e.item.id}-${e.date}`}>
-                    {i === nowIndex && <div className="now-line" aria-label={`Now, ${hm}`}><span>{d.num(hm)}</span></div>}
+                    {i === nowIndex && <div className="today-now" aria-label={`Now, ${hm}`}><span>{d.num(hm)}</span></div>}
                     <ItemRow entry={e} today={today} selected={life.selectedItem === e.item.id} onOpen={() => life.onOpenItem(e.item.id)} onDone={() => life.onDone(e.item)} />
                   </div>
                 ))
               )}
-              {todays.length > 0 && nowIndex === -1 && <div className="now-line" aria-label={`Now, ${hm}`}><span>{d.num(hm)}</span></div>}
+              {todays.length > 0 && nowIndex === -1 && <div className="today-now" aria-label={`Now, ${hm}`}><span>{d.num(hm)}</span></div>}
             </section>
           </div>
           <div className="stack">
@@ -446,94 +446,132 @@ export function FestivalPanel({
 
 // Search ----------------------------------------------------------------------
 
-export function SearchScreen({ life, tasks, onOpenTask, focusKey }: { life: LifeProps; tasks: PlannerTask[]; onOpenTask: (id: string) => void; focusKey: number }) {
+export function SearchScreen({ life, tasks, onOpenTask, focusKey, query, onQuery }: { life: LifeProps; tasks: PlannerTask[]; onOpenTask: (id: string) => void; focusKey: number; query: string; onQuery: (q: string) => void }) {
   const d = useDates();
-  const [query, setQuery] = useState('');
   const input = useRef<HTMLInputElement>(null);
-  useEffect(() => input.current?.focus(), [focusKey]);
-  const docs = useMemo<SearchDoc[]>(() => {
-    const out: SearchDoc[] = [];
-    const notesBy = new Map<string, Note[]>();
-    for (const n of life.notes) if (n.deleted_at_ms == null) notesBy.set(n.parent_id, [...(notesBy.get(n.parent_id) ?? []), n]);
-    for (const i of life.items ?? [])
-      out.push({
-        kind: 'item',
-        id: i.id,
-        title: i.title,
-        fields: [
-          { label: 'Description', text: i.notes ?? '' },
-          ...i.steps.map((s) => ({ label: 'Step', text: s.title })),
-          ...(notesBy.get(i.id) ?? []).map((n) => ({ label: 'Note', text: n.body })),
-          { label: 'Category', text: i.category ?? '' },
-          { label: 'Type', text: kindLabel(i.kind) },
-        ].filter((f) => f.text),
-        day: i.undated ? null : i.due_date_ad,
-        done: isDone(i),
-      });
-    for (const t of tasks) out.push({ kind: 'task', id: t.id, title: t.title, fields: [{ label: 'Description', text: t.description }, { label: 'Labels', text: t.labels }].filter((f) => f.text), day: t.due_date, done: isClosed(t.status) });
-    return out;
-  }, [life.items, life.notes, tasks]);
-  const result = useMemo(() => {
-    const base = search(docs, query, life.today);
-    const fests = life.cal && query.trim().length > 1 ? life.cal.search(query).filter((f) => f.iso >= addDays(life.today, -60)).slice(0, 20) : [];
-    return { ...base, fests };
-  }, [docs, query, life.today, life.cal]);
-
-  const hit = (h: SearchHit) => (
-    <button key={`${h.doc.kind}-${h.doc.id}`} className="search-hit" onClick={() => (h.doc.kind === 'task' ? onOpenTask(h.doc.id) : life.onOpenItem(h.doc.id))}>
-      <span className="search-kind">{h.doc.kind === 'task' ? <TasksIcon size={16} /> : <EventsIcon size={16} />}</span>
-      <span className="search-words">
-        <span className={h.doc.done ? 'item-title closed' : 'item-title'}>{h.doc.title}</span>
-        <span className="muted small">
-          {[h.doc.kind === 'task' ? 'Task' : 'Item', h.doc.day && d.primary(h.doc.day), h.where && `${h.where.label}: ${h.where.text.slice(0, 80)}`].filter(Boolean).join(' · ')}
-        </span>
-      </span>
-    </button>
+  const list = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    input.current?.focus();
+    input.current?.select();
+  }, [focusKey]);
+  const docs = useMemo(
+    () => buildSearchDocs({ items: life.items ?? [], notes: life.notes, tasks, festivals: life.cal?.all() ?? [] }),
+    [life.items, life.notes, tasks, life.cal],
   );
-  const empty = query.trim() && !result.matches.length && !result.partial.length && !result.fests.length;
+  const results = useMemo(() => search(docs, query, life.today), [docs, query, life.today]);
+
+  const open = (doc: SearchDoc) => {
+    if (doc.kind === 'task') onOpenTask(doc.id);
+    else if (doc.kind === 'festival') life.onOpenFestival(doc.festival!);
+    else life.onOpenItem(doc.id);
+  };
+  /// Up and down move through the results; up from the first goes back to the field.
+  const onListKey = (e: KeyboardEvent) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const rows = [...(list.current?.querySelectorAll<HTMLButtonElement>('.search-hit') ?? [])];
+    const at = rows.indexOf(document.activeElement as HTMLButtonElement);
+    const next = e.key === 'ArrowDown' ? (at < 0 ? 0 : Math.min(at + 1, rows.length - 1)) : at - 1;
+    e.preventDefault();
+    if (next < 0) input.current?.focus();
+    else rows[next]?.focus();
+  };
+
+  // "Bill · 16 Kartik · 09:30 · Done", "Holiday · 3 Kartik", "In progress · 2 Nov".
+  const meta = (doc: SearchDoc) =>
+    [doc.label, doc.kind === 'item' && !doc.day ? 'No date' : doc.day && d.short(doc.day), doc.time && d.num(doc.time), doc.kind === 'item' && doc.done && 'Done']
+      .filter(Boolean)
+      .join(' · ');
+
+  const group = (title: string, hits: SearchHit[]) => (
+    <section className="search-group" aria-label={title}>
+      <h3 className="group-head">
+        <span className="group-name">{title}</span>
+        <span className="count">{d.num(hits.length)}</span>
+      </h3>
+      {hits.slice(0, searchPageSize).map((h) => {
+        const snippet = h.detail && searchSnippet(h.detail.text, results.terms);
+        const label = h.detail && fieldLabels[h.detail.kind];
+        return (
+          <button
+            key={`${h.doc.kind}-${h.doc.id}`}
+            className={life.selectedItem === h.doc.id ? 'search-hit selected' : 'search-hit'}
+            aria-label={[h.doc.title, meta(h.doc), snippet && `${label}: ${snippet}`].filter(Boolean).join(', ')}
+            onClick={() => open(h.doc)}
+          >
+            <span className="search-badge" aria-hidden="true">
+              {h.doc.kind === 'task' ? <TasksIcon size={17} /> : h.doc.kind === 'festival' ? <DiyoIcon size={17} /> : <EventsIcon size={17} />}
+            </span>
+            <span className="search-words" aria-hidden="true">
+              <Highlighted className={h.doc.done ? 'item-title closed' : 'item-title'} text={h.doc.title.replace(/\s+/g, ' ')} terms={results.terms} />
+              <span className="muted small search-meta">{meta(h.doc)}</span>
+              {snippet && <Highlighted className="search-snippet" text={`${label}: ${snippet}`} terms={results.terms} skip={label!.length + 2} />}
+            </span>
+            <ChevronSide size={14} />
+          </button>
+        );
+      })}
+      {hits.length > searchPageSize && <p className="muted small">{d.num(hits.length - searchPageSize)} more. Add a word to narrow it down.</p>}
+    </section>
+  );
+
   return (
     <>
       <div className="page-head">
         <h1 className="page-title">Search</h1>
+        <span className="muted small kbd-hint">{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl+K'} from anywhere</span>
       </div>
       <label className="field-pill search-pill big">
         <SearchIcon size={18} />
         <input
           ref={input}
           type="search"
-          placeholder="Items, notes, tasks and festivals"
+          placeholder="Search reminders, events, tasks, festivals"
           value={query}
           autoCorrect="off"
           autoCapitalize="off"
           spellCheck={false}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => onQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') onListKey(e);
+            else if (e.key === 'Enter') {
+              const first = results.full[0] ?? results.partial[0];
+              if (first) open(first.doc);
+            }
+          }}
           aria-label="Search"
         />
       </label>
-      {!query.trim() && <p className="muted">Search your reminders, birthdays, bills, their notes and steps, your tasks and every festival. Exact matches come first.</p>}
-      {empty && <p className="empty muted">Nothing matches “{query.trim()}”.</p>}
-      {result.matches.length > 0 && (
-        <section className="search-group" aria-label="Matches">
-          <h3 className="kicker">Matches</h3>
-          {result.matches.map(hit)}
-        </section>
-      )}
-      {result.fests.length > 0 && (
-        <section className="search-group" aria-label="Festivals">
-          <h3 className="kicker">Festivals</h3>
-          {result.fests.map((f) => (
-            <FestivalRow key={`${f.id}-${f.iso}`} festival={f} showDate onOpen={() => life.onOpenFestival(f)} />
-          ))}
-        </section>
-      )}
-      {result.partial.length > 0 && (
-        <section className="search-group" aria-label="Partial matches">
-          <h3 className="kicker">Partial matches</h3>
-          {result.partial.map(hit)}
-        </section>
+      {results.terms.length === 0 ? (
+        <p className="muted search-hint">
+          Finds words in titles, descriptions, steps, notes, categories, task labels and sub-tasks, and festivals in English or Nepali. People, alarms and Google events
+          are searched on your phone.
+        </p>
+      ) : !results.full.length && !results.partial.length ? (
+        <p className="empty muted">Nothing matches “{query.trim()}”</p>
+      ) : (
+        <div className="search-results" ref={list} onKeyDown={onListKey}>
+          {results.full.length > 0 && group('Matches', results.full)}
+          {results.partial.length > 0 && group('Partial matches', results.partial)}
+        </div>
       )}
     </>
   );
+}
+
+/// [text] with every occurrence of [terms] bold in the accent colour; the
+/// first [skip] characters (a label) are never highlighted.
+function Highlighted({ text, terms, className, skip = 0 }: { text: string; terms: string[]; className?: string; skip?: number }) {
+  const parts: ReactNode[] = [];
+  let at = 0;
+  for (const [start, end] of highlightRanges(text, terms)) {
+    const from = Math.max(start, skip);
+    if (end <= from) continue;
+    if (from > at) parts.push(text.slice(at, from));
+    parts.push(<mark key={from}>{text.slice(from, end)}</mark>);
+    at = end;
+  }
+  if (at < text.length) parts.push(text.slice(at));
+  return <span className={className}>{parts}</span>;
 }
 
 // Phone-only ------------------------------------------------------------------

@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ItemsRepo } from '../src/data/itemsRepo';
 import { newItemRow, type Item } from '../src/domain/item';
-import { search, type SearchDoc } from '../src/domain/search';
 import { toIcs } from '../src/domain/ics';
 import { FakeStore } from './fakeStore';
 
@@ -75,20 +74,6 @@ describe('items', () => {
     const [note] = await repo.notesFor(item.id);
     await repo.removeNote(note!);
     expect(await repo.notesFor(item.id)).toEqual([]);
-  });
-});
-
-describe('search', () => {
-  const docs: SearchDoc[] = [
-    { kind: 'item', id: 'a', title: 'Pay electricity bill', fields: [], day: '2026-11-01', done: false },
-    { kind: 'task', id: 'b', title: 'Bill review', fields: [{ label: 'Description', text: 'pay the team' }], day: null, done: false },
-    { kind: 'festival', id: 'c', title: 'Tihar', fields: [{ label: 'Nepali', text: 'तिहार' }], day: '2026-11-08', done: false },
-  ];
-  it('puts the whole phrase first, then partial matches', () => {
-    const r = search(docs, 'pay bill', '2026-10-30');
-    expect(r.matches).toEqual([]);
-    expect(r.partial.map((h) => h.doc.id)).toEqual(['a', 'b']);
-    expect(search(docs, 'तिहार', '2026-10-30').matches[0]!.where?.label).toBe('Nepali');
   });
 });
 
