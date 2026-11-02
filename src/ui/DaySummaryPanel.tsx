@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { allDayNotes, dayNote, dayNoteLimit, loadReportScope, saveDayNote, saveReportScope } from '../data/dayNotes';
+import { dayNoteLimit, loadReportScope, saveReportScope } from '../data/dayNotes';
 import { bsLabel } from '../domain/bs';
 import { addDays, monthLength } from '../domain/dates';
 import { fullScope, inScope, noteLines, rangeSummary, reportForClaude, scopeNarrowed, suggestedPoints, summaryText, type ReportScope } from '../domain/daySummary';
@@ -55,6 +55,9 @@ export function DaySummaryPanel({
   tasks,
   projects,
   time,
+  loadTime,
+  notesByDay,
+  onSaveNote,
   today,
   onOpen,
   onClose,
@@ -63,6 +66,11 @@ export function DaySummaryPanel({
   tasks: PlannerTask[];
   projects: Project[];
   time: TimeData | null;
+  /// Worked time from [sinceMs] on, for weeks and months before this one
+  /// (the page itself loads this week only).
+  loadTime: (sinceMs: number) => Promise<TimeData | null>;
+  notesByDay: Record<string, string>;
+  onSaveNote: (day: string, text: string) => void;
   today: string;
   onOpen: (id: string) => void;
   onClose: () => void;
@@ -71,12 +79,24 @@ export function DaySummaryPanel({
   const { num } = useSettings();
   const [period, setPeriodState] = useState<Period>(lastPeriod);
   const [day, setDay] = useState(today);
-  const [notes, setNotes] = useState(() => dayNote(today));
+  const [notes, setNotes] = useState(() => notesByDay[today] ?? '');
   const [scope, setScopeState] = useState<ReportScope>(loadReportScope);
   const [picking, setPicking] = useState(false);
   const saved = useRef(notes);
   const { from, count } = rangeOf(period, day);
-  const s = useMemo(() => rangeSummary(from, count, tasks, time, today, scope), [from, count, tasks, time, today, scope]);
+  const start = startOfLocalDay(from);
+  const older = start < startOfLocalDay(weekStart(today));
+  const [past, setPast] = useState<{ since: number; data: TimeData | null } | null>(null);
+  useEffect(() => {
+    if (!older || (past && past.since <= start)) return;
+    let live = true;
+    loadTime(start).then((data) => live && setPast({ since: start, data }));
+    return () => {
+      live = false;
+    };
+  }, [older, start, past, loadTime]);
+  const rangeTime = older ? (past && past.since <= start ? past.data : null) : time;
+  const s = useMemo(() => rangeSummary(from, count, tasks, rangeTime, today, scope), [from, count, tasks, rangeTime, today, scope]);
   const suggested = useMemo(() => suggestedPoints(s, projects), [s, projects]);
   const projectById = new Map(projects.map((p) => [p.id, p]));
   const at = (ms: number) => clock(ms, num);
@@ -99,15 +119,26 @@ export function DaySummaryPanel({
   useEffect(() => {
     if (notes === saved.current) return;
     const id = setTimeout(() => {
-      if (saveDayNote(day, notes)) saved.current = notes;
-    }, 400);
+      onSaveNote(day, notes);
+      saved.current = notes;
+    }, 600);
     return () => clearTimeout(id);
-  }, [notes, day]);
+  }, [notes, day, onSaveNote]);
+
+  // Notes arriving from another computer show here unless typing is under way.
+  useEffect(() => {
+    const incoming = notesByDay[day] ?? '';
+    if (notes === saved.current && incoming !== notes) {
+      saved.current = incoming;
+      setNotes(incoming);
+    }
+    // Only when the synced notes or the day change, not on every keystroke.
+  }, [notesByDay, day]);
 
   function goTo(next: string) {
-    if (notes !== saved.current) saveDayNote(day, notes);
+    if (notes !== saved.current) onSaveNote(day, notes);
     const target = next > today ? today : next;
-    const text = dayNote(target);
+    const text = target === day ? notes : (notesByDay[target] ?? '');
     saved.current = text;
     setNotes(text);
     setDay(target);
@@ -141,8 +172,7 @@ export function DaySummaryPanel({
         ? `This ${period}`
         : `${period === 'week' ? 'Week' : 'Month'} summary`;
   const forClaude = () => {
-    if (notes !== saved.current && saveDayNote(day, notes)) saved.current = notes;
-    return reportForClaude(s, projects, allDayNotes(), title, shortDay);
+    return reportForClaude(s, projects, { ...notesByDay, [day]: notes }, title, shortDay);
   };
 
   const name = (id: string | null) => (id ? (projectById.get(id)?.name ?? 'Other') : 'No project');
@@ -166,7 +196,7 @@ export function DaySummaryPanel({
     .filter(Boolean)
     .join(' · ');
   const notedDays = (() => {
-    const all = allDayNotes();
+    const all = notesByDay;
     return Object.keys(all).filter((d) => d >= from && d < addDays(from, count) && noteLines(all[d]!).length).length;
   })();
 
@@ -358,10 +388,13 @@ export function DaySummaryPanel({
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             onBlur={() => {
-              if (notes !== saved.current && saveDayNote(day, notes)) saved.current = notes;
+              if (notes !== saved.current) {
+                onSaveNote(day, notes);
+                saved.current = notes;
+              }
             }}
           />
-          <p className="muted small">Saved on this computer only, for now.</p>
+          <p className="muted small">Saved to your Nindo account, so every computer and the Claude connector see it.</p>
           <div className="report-actions">
             <button className="secondary" onClick={() => copy(summaryText(s, projects, notes, longDay(day), at), 'Day summary')}>
               <Copy size={16} /> Copy day summary

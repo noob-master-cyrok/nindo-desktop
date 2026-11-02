@@ -16,7 +16,7 @@ import {
 } from '../domain/planner';
 import type { Store, Table } from './store';
 import { buildPatch } from './writeRules';
-import type { AttendanceDay, Break, BreakRun, Session, TimeData } from '../domain/time';
+import type { AttendanceDay, Break, BreakRun, DayNote, Session, TimeData } from '../domain/time';
 
 export type SaveResult<T> =
   | { status: 'saved'; row: T }
@@ -269,6 +269,30 @@ export class PlannerRepo {
       out.push(...(page as T[]));
       if (page.length < 1000) return out;
     }
+  }
+
+  /// Every day's notes and points to present (migration 0007), live rows only.
+  async dayNotes(): Promise<DayNote[]> {
+    return (await this.all<DayNote>('planner_day_notes')).filter((n) => n.deleted_at_ms == null);
+  }
+
+  /// Saves [day]'s note; the latest edit wins, as with the phone's rows. An
+  /// empty note is kept as an empty row, so it clears every computer.
+  async saveDayNote(day: string, note: string): Promise<SaveResult<DayNote>> {
+    if (note.length > 4000) return { status: 'invalid', problems: ['The note is too long.'] };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const now = this.now();
+      const existing = (await this.store.fetchById('planner_day_notes', day)) as DayNote | null;
+      if (!existing) {
+        const result = await this.store.insert('planner_day_notes', { id: day, note, created_at_ms: now, updated_at_ms: now, deleted_at_ms: null });
+        if (result.kind === 'inserted') return { status: 'saved', row: result.row as unknown as DayNote };
+        continue;
+      }
+      const patch = buildPatch(existing as unknown as Record<string, unknown>, { note, deleted_at_ms: null }, now);
+      const saved = await this.store.updateIfRevision('planner_day_notes', day, existing.revision, patch);
+      if (saved) return { status: 'saved', row: saved as unknown as DayNote };
+    }
+    return { status: 'gone' };
   }
 
   /// Sets one day's check-in, check-out and note by hand, as the phone's

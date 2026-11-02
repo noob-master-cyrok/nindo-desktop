@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { dayNote, noteDays, saveDayNote } from '../src/data/dayNotes';
+import { adoptRemote, dayNote, daysToUpload, markSynced, markUnsynced, noteDays, saveDayNote } from '../src/data/dayNotes';
+import { PlannerRepo } from '../src/data/plannerRepo';
+import { FakeStore } from './fakeStore';
 import { daySummary, inScope, rangeSummary, reportForClaude, suggestedPoints, summaryText } from '../src/domain/daySummary';
 import type { PlannerTask, Project } from '../src/domain/planner';
 import type { Session, TimeData } from '../src/domain/time';
@@ -151,5 +153,43 @@ describe('day notes', () => {
     saveDayNote(day, '   ');
     expect(dayNote(day)).toBe('');
     expect(noteDays()).toEqual(['2026-11-01']);
+  });
+});
+
+describe('synced day notes', () => {
+  beforeEach(() => {
+    const store = new Map<string, string>();
+    globalThis.localStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+      clear: () => store.clear(),
+      key: () => null,
+      length: 0,
+    } as Storage;
+  });
+
+  it('uploads notes only this computer has, and keeps typing that is not saved yet', () => {
+    saveDayNote('2026-10-30', 'from before sync');
+    saveDayNote(day, 'typed offline');
+    markUnsynced(day);
+    expect(daysToUpload({ [day]: 'older on server' }).sort()).toEqual(['2026-10-30', day]);
+    const merged = adoptRemote({ [day]: 'older on server', '2026-10-29': 'from the other computer', '2026-10-28': '' });
+    expect(merged).toEqual({ [day]: 'typed offline', '2026-10-29': 'from the other computer' });
+    markSynced(day);
+    expect(adoptRemote({ [day]: 'newer on server' })[day]).toBe('newer on server');
+  });
+
+  it('saves a day note on the server, latest edit winning', async () => {
+    const store = new FakeStore();
+    let now = 1_000;
+    const repo = new PlannerRepo({ store, now: () => now });
+    expect((await repo.saveDayNote(day, '• one')).status).toBe('saved');
+    now = 2_000;
+    store.phoneWrite('planner_day_notes', day, { note: 'other computer', updated_at_ms: 1_500 });
+    const saved = await repo.saveDayNote(day, '• two');
+    expect(saved.status === 'saved' && saved.row.note).toBe('• two');
+    expect((await repo.dayNotes()).map((n) => n.note)).toEqual(['• two']);
+    expect((await repo.saveDayNote(day, 'x'.repeat(4001))).status).toBe('invalid');
   });
 });

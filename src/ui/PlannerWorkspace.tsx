@@ -28,6 +28,7 @@ import { Board } from './Board';
 import { DailyPlanningCard, Highlights } from './Cards';
 import { DayPlanner } from './DayPlanner';
 import { DaySummaryPanel } from './DaySummaryPanel';
+import { adoptRemote, allDayNotes, daysToUpload, markSynced, markUnsynced, saveDayNote } from '../data/dayNotes';
 import { bsLabel } from '../domain/bs';
 import { AttendanceCard, BreaksCard, WeekInsights } from './TimeCards';
 import { FilterDialog } from './FilterDialog';
@@ -227,6 +228,44 @@ export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }
   const say = useCallback((text: string, action?: ToastMessage['action']) => setToast({ id: Date.now(), text, action }), []);
   const hideToast = useCallback(() => setToast(null), []);
 
+  const [dayNotes, setDayNotes] = useState<Record<string, string>>(allDayNotes);
+  /// Sends notes typed here that Supabase does not have yet, then takes the
+  /// server's notes. Offline, the copy on this computer stays.
+  const syncNotes = useCallback(async () => {
+    try {
+      const remote = Object.fromEntries((await planner.dayNotes()).map((n) => [n.id, n.note]));
+      const local = allDayNotes();
+      for (const day of daysToUpload(remote)) {
+        const r = await planner.saveDayNote(day, local[day] ?? '');
+        if (r.status === 'saved') {
+          markSynced(day);
+          remote[day] = r.row.note;
+        }
+      }
+      setDayNotes(adoptRemote(remote));
+    } catch (e) {
+      console.warn('[nindo] day notes unavailable', e instanceof Error ? e.message : 'error');
+    }
+  }, [planner]);
+  const saveNote = useCallback(
+    (day: string, text: string) => {
+      saveDayNote(day, text);
+      markUnsynced(day);
+      setDayNotes((m) => {
+        const next = { ...m };
+        if (text.trim()) next[day] = text;
+        else delete next[day];
+        return next;
+      });
+      planner
+        .saveDayNote(day, text)
+        .then((r) => r.status === 'saved' && markSynced(day))
+        .catch(() => undefined);
+    },
+    [planner],
+  );
+  const loadTime = useCallback((sinceMs: number) => planner.timeSince(sinceMs), [planner]);
+
   const load = useCallback(async () => {
     try {
       const [data, today, timeData] = await Promise.all([
@@ -239,10 +278,11 @@ export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }
       setActivity(today);
       setTime(timeData);
       setError(null);
+      void syncNotes();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load your tasks.');
     }
-  }, [planner]);
+  }, [planner, syncNotes]);
 
   useEffect(() => {
     load();
@@ -1057,6 +1097,9 @@ export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }
             tasks={all}
             projects={projects}
             time={time}
+            loadTime={loadTime}
+            notesByDay={dayNotes}
+            onSaveNote={saveNote}
             today={today}
             onOpen={(id) => open(id)}
             onClose={toggleSummary}

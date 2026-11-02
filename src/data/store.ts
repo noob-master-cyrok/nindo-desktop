@@ -10,6 +10,7 @@ export type Table =
   | 'planner_breaks'
   | 'planner_break_runs'
   | 'planner_attendance'
+  | 'planner_day_notes'
   | 'tasks'
   | 'item_notes'
   | 'xp_ledger';

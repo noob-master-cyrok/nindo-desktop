@@ -40,6 +40,12 @@ export interface AttendanceDay extends Synced {
   edited: boolean;
 }
 
+/// The desktop's notes and points to present for one local day (`id` is
+/// yyyy-mm-dd), migration 0007.
+export interface DayNote extends Synced {
+  note: string;
+}
+
 export interface TimeData {
   sessions: Session[];
   breaks: Break[];

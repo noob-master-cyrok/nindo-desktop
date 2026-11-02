@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "e2e": "playwright test",
-    "check:secrets": "node scripts/check-secrets.mjs"
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "build:mcp": "esbuild mcp/server.ts --bundle --platform=node --format=esm --target=node22 --outfile=mcp/dist/nindo-mcp.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\""
   },
   "dependencies": {
     "@supabase/supabase-js": "2.118.0",
@@ -20,11 +21,13 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@playwright/test": "1.64.1",
     "@types/papaparse": "5.5.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
+    "esbuild": "0.28.2",
     "typescript": "7.0.2",
     "vite": "8.3.5",
     "vitest": "5.0.5"

@@ -18,6 +18,7 @@ export class MockSupabase {
     planner_breaks: new Map(),
     planner_break_runs: new Map(),
     planner_attendance: new Map(),
+    planner_day_notes: new Map(),
     tasks: new Map(),
     item_notes: new Map(),
     xp_ledger: new Map(),

@@ -1,8 +1,9 @@
 import { fullScope, type ReportScope } from '../domain/daySummary';
 
-/// Notes and points to present, one text per day, kept on this computer.
-/// Nothing here syncs yet: Supabase has no table for day notes, and adding
-/// one is a migration Safu decides on.
+/// Notes and points to present, one text per day. Supabase holds them
+/// (planner_day_notes, migration 0007); this computer keeps a copy so the
+/// panel opens at once and typing offline is not lost. Days typed here and
+/// not yet saved to Supabase are listed under [unsyncedKey].
 
 const key = 'nindo.desktop.dayNotes';
 
@@ -36,6 +37,60 @@ export function saveDayNote(day: string, text: string): boolean {
   } catch {
     return false;
   }
+}
+
+const unsyncedKey = 'nindo.desktop.dayNotesUnsynced';
+
+function readUnsynced(): string[] {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(unsyncedKey) ?? '[]');
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeUnsynced(days: string[]) {
+  try {
+    localStorage.setItem(unsyncedKey, JSON.stringify([...new Set(days)]));
+  } catch {
+    // Private windows may refuse; the note is then sent on the next save.
+  }
+}
+
+export function markUnsynced(day: string) {
+  writeUnsynced([...readUnsynced(), day]);
+}
+
+export function markSynced(day: string) {
+  writeUnsynced(readUnsynced().filter((d) => d !== day));
+}
+
+/// Days to send to Supabase: typed here and not saved yet, or kept only on
+/// this computer from before notes synced.
+export function daysToUpload(remote: Record<string, string>): string[] {
+  const local = readAll();
+  const pending = new Set(readUnsynced());
+  return Object.keys(local).filter((d) => pending.has(d) || !(d in remote));
+}
+
+/// The server's notes become this computer's copy, except days still waiting
+/// to upload.
+export function adoptRemote(remote: Record<string, string>): Record<string, string> {
+  const local = readAll();
+  const pending = new Set(readUnsynced());
+  const merged: Record<string, string> = {};
+  for (const [d, text] of Object.entries(remote)) if (text.trim()) merged[d] = text;
+  for (const d of pending) {
+    if (local[d]) merged[d] = local[d];
+    else delete merged[d];
+  }
+  try {
+    localStorage.setItem(key, JSON.stringify(merged));
+  } catch {
+    // Keep going with what is in memory.
+  }
+  return merged;
 }
 
 /// Every day that has a note, newest first, for an export.
