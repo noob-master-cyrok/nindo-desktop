@@ -11,7 +11,8 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "check:secrets": "node scripts/check-secrets.mjs",
-    "build:mcp": "esbuild mcp/server.ts --bundle --platform=node --format=esm --target=node22 --outfile=mcp/dist/nindo-mcp.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\""
+    "build:mcp": "esbuild mcp/server.ts --bundle --platform=node --format=esm --target=node22 --outfile=mcp/dist/nindo-mcp.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "build:mcp-remote": "esbuild mcp/remote.ts --bundle --platform=neutral --format=esm --target=es2022 --external:zod --outfile=../supabase/functions/nindo-mcp/bundle.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.118.0",

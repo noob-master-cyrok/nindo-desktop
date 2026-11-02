@@ -3820,3 +3820,15 @@ button.blk:hover {
   flex-shrink: 0;
   white-space: nowrap;
 }
+
+/* Allowing Claude (or another app) to read Nindo. */
+.connect-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.connect-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

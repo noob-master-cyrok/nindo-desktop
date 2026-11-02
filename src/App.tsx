@@ -6,9 +6,12 @@ import { PlannerRepo } from './data/plannerRepo';
 import { ItemsRepo } from './data/itemsRepo';
 import { SignIn } from './ui/SignIn';
 import { PlannerWorkspace } from './ui/PlannerWorkspace';
+import { ConnectClaude, pendingAuthorization } from './ui/ConnectClaude';
 
 export function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
+  // Claude's connect request, shown once signed in.
+  const [authorization, setAuthorization] = useState(pendingAuthorization);
 
   useEffect(() => {
     if (!supabase) return;
@@ -36,6 +39,7 @@ export function App() {
   }
   if (session === undefined) return <main className="center muted">Loading…</main>;
   if (!session) return <SignIn client={supabase} />;
+  if (authorization) return <ConnectClaude client={supabase} authorizationId={authorization} onDone={() => setAuthorization(null)} />;
   return (
     <PlannerWorkspace
       key={session.user.id}
