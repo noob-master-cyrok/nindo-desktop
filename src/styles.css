@@ -3598,3 +3598,225 @@ button.blk:hover {
 .list-pane:focus {
   outline: none;
 }
+
+/* ---- Day summary ----
+   The day at a glance in the right column of the Tasks page, while no task
+   is open. A narrow window slides it over the page, like the task. */
+.app.with-summary {
+  grid-template-columns: 248px minmax(0, 1fr) minmax(320px, 380px);
+}
+.app.side-hidden.with-summary {
+  grid-template-columns: 56px minmax(0, 1fr) minmax(320px, 380px);
+}
+@media (max-width: 1180px) {
+  .app.with-summary {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+  .app.side-hidden.with-summary {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+}
+@media (max-width: 760px) {
+  .app.with-summary,
+  .app.side-hidden.with-summary {
+    grid-template-columns: 1fr;
+  }
+}
+.summary-pane {
+  background: var(--bg);
+}
+.day-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  animation: fade-up var(--base) var(--standard) backwards;
+}
+.day-summary-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.day-summary-title {
+  margin: 2px 0 0;
+  font-size: 20px;
+  line-height: 1.25;
+  font-weight: 600;
+}
+.day-stats {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.day-stats > div {
+  padding: 10px 12px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-m);
+}
+.day-stats dd {
+  margin: 2px 0 0;
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.day-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.project-bars,
+.day-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.project-bars {
+  gap: 6px;
+}
+.project-bars li {
+  display: grid;
+  grid-template-columns: minmax(0, 7em) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+.project-bar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-bar-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--rule);
+  overflow: hidden;
+}
+.project-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+}
+.day-list li + li {
+  border-top: 1px solid var(--rule);
+}
+.day-task {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 6px 4px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  border-radius: var(--r-s);
+  cursor: pointer;
+}
+.day-task:hover {
+  background: var(--card);
+}
+.day-task-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.day-notes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.day-notes {
+  width: 100%;
+  resize: vertical;
+  min-height: 132px;
+  font: inherit;
+  line-height: 1.5;
+}
+.day-notes-head .chip {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.scope-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-m);
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.scope-toggle.on {
+  border-color: var(--acc);
+}
+.scope-words {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.scope-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 2px;
+}
+.scope-picker .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.scope-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+}
+.small-button {
+  align-self: flex-start;
+  min-height: 34px;
+  padding: 0 14px;
+}
+.day-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.report-check {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--acc);
+}
+.day-row.left-out .day-task {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+.report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.report-actions > button {
+  flex: 1 1 140px;
+}
+.day-row .day-task {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+.day-task > .small {
+  flex-shrink: 0;
+  white-space: nowrap;
+}

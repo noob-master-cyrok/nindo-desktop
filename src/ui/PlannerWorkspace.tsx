@@ -27,10 +27,11 @@ import { useSettings } from '../settings';
 import { Board } from './Board';
 import { DailyPlanningCard, Highlights } from './Cards';
 import { DayPlanner } from './DayPlanner';
+import { DaySummaryPanel } from './DaySummaryPanel';
 import { bsLabel } from '../domain/bs';
 import { AttendanceCard, BreaksCard, WeekInsights } from './TimeCards';
 import { FilterDialog } from './FilterDialog';
-import { BoardIcon, Chevron, Close, DayIcon, Download, Expand, FilterIcon, Gear, Leaf, ListIcon, Pause, Plus, Refresh, Search, SidebarIcon, Sliders, StatusIcon } from './Icons';
+import { BoardIcon, Chevron, Close, DayIcon, DaySummaryIcon, Download, Expand, FilterIcon, Gear, Leaf, ListIcon, Pause, Plus, Refresh, Search, SidebarIcon, Sliders, StatusIcon } from './Icons';
 import { Modal } from './Modal';
 import { Segmented } from './Segmented';
 import { SettingsDialog } from './SettingsDialog';
@@ -72,6 +73,20 @@ function startOfToday(): number {
 type View = 'list' | 'board' | 'day';
 
 const sidebarKey = 'nindo.desktop.sidebar';
+const summaryKey = 'nindo.desktop.daySummary';
+/// Wide enough for the day summary as a column beside the page.
+const wideQuery = '(min-width: 1181px)';
+
+function useWide(): boolean {
+  const [wide, setWide] = useState(() => window.matchMedia(wideQuery).matches);
+  useEffect(() => {
+    const m = window.matchMedia(wideQuery);
+    const on = () => setWide(m.matches);
+    m.addEventListener('change', on);
+    return () => m.removeEventListener('change', on);
+  }, []);
+  return wide;
+}
 const viewKey = 'nindo.desktop.view';
 
 function lastView(): View {
@@ -190,6 +205,17 @@ export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [fullClock, setFullClock] = useState(false);
   const [sideHidden, setSideHidden] = useState(sidebarWasHidden);
+  const wide = useWide();
+  // On a wide window the summary stays open unless hidden; on a narrow one
+  // it slides over the page only when asked for.
+  const [summaryKept, setSummaryKept] = useState(() => {
+    try {
+      return localStorage.getItem(summaryKey) !== 'hidden';
+    } catch {
+      return true;
+    }
+  });
+  const [summaryOver, setSummaryOver] = useState(false);
   // Just hidden with the pointer still on it: no peek until the pointer leaves.
   const [noPeek, setNoPeek] = useState(false);
   /// The open task panel's "save what is typed"; resolves false to stay open.
@@ -468,6 +494,12 @@ export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }
   };
   const openItemRow = itemSel && 'id' in itemSel ? (life.items?.find((i) => i.id === itemSel.id) ?? null) : null;
   const paneOpen = !!selected || !!itemSel || !!festSel;
+  const summaryOpen = section === 'tasks' && !paneOpen && (wide ? summaryKept : summaryOver);
+  function toggleSummary() {
+    if (!wide) return setSummaryOver((v) => !v);
+    remember(summaryKey, summaryKept ? 'hidden' : 'shown');
+    setSummaryKept((v) => !v);
+  }
   const todayCount = life.items ? entriesBetween(life.items, today, today).filter((e) => !isDone(e.item)).length : 0;
   const overdueCount = life.items ? life.items.filter((i) => !isDone(i) && !i.undated && i.due_date_ad < today).length : 0;
   const timerLive = liveIds.length > 0 || !!timers.state.focus;
@@ -605,7 +637,7 @@ export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }
   const narrowed = filterActive(filter) || sort !== 'manual';
 
   return (
-    <div className={['app', paneOpen && 'with-task', sideHidden && 'side-hidden', noPeek && 'no-peek'].filter(Boolean).join(' ')}>
+    <div className={['app', paneOpen && 'with-task', summaryOpen && 'with-summary', sideHidden && 'side-hidden', noPeek && 'no-peek'].filter(Boolean).join(' ')}>
       {sideHidden && (
         <nav className="side-rail" aria-label="Places">
           <button className="icon-button side-toggle" aria-label="Show sidebar" title="Show sidebar ([)" aria-expanded="false" onClick={toggleSidebar} onPointerEnter={() => setNoPeek(false)}>
@@ -820,6 +852,9 @@ export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }
               ]}
               onChange={setView}
             />
+            <button className="icon-button" aria-label="Day summary" title="Day summary" aria-pressed={summaryOpen} onClick={toggleSummary}>
+              <DaySummaryIcon />
+            </button>
             <button className="icon-button" aria-label="Refresh" title="Refresh" onClick={load}>
               <Refresh />
             </button>
@@ -1016,6 +1051,19 @@ export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }
       </main>
       )}
 
+      {summaryOpen && (
+        <aside className="detail-pane open summary-pane" aria-label="Day summary">
+          <DaySummaryPanel
+            tasks={all}
+            projects={projects}
+            time={time}
+            today={today}
+            onOpen={(id) => open(id)}
+            onClose={toggleSummary}
+            say={say}
+          />
+        </aside>
+      )}
       <aside className={paneOpen ? 'detail-pane open' : 'detail-pane'} aria-label={selected ? 'Task' : itemSel ? 'Item' : 'Festival'} hidden={!paneOpen}>
         {itemSel && ('defaults' in itemSel || openItemRow) && (
           <ItemPanel

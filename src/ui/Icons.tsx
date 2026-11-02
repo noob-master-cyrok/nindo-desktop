@@ -331,3 +331,11 @@ export const BellIcon = (p: P) => (
     <path d="M10 20.5a2 2 0 0 0 4 0" />
   </Svg>
 );
+
+/// A page with a column on its right: the day summary.
+export const DaySummaryIcon = (p: P) => (
+  <Svg {...p}>
+    <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
+    <path d="M14.5 4.5v15M17 8.5h1M17 11.5h1M17 14.5h1" />
+  </Svg>
+);
