@@ -323,6 +323,13 @@ export function dailyPlanningId(today: string): string {
   return `daily-planning-${today}`;
 }
 
+/// When [taskId] last went in progress, from its history.
+export function planningStarted(activity: Pick<Activity, 'task_id' | 'kind' | 'body' | 'created_at_ms'>[], taskId: string): number | null {
+  return activity
+    .filter((a) => a.task_id === taskId && a.kind === 'status' && a.body === 'doing')
+    .reduce<number | null>((last, a) => Math.max(last ?? 0, a.created_at_ms), null);
+}
+
 /// "1 h 25 min", "40 min".
 export function durationLabel(minutes: number, num: (n: number) => string = String): string {
   const h = Math.floor(minutes / 60);

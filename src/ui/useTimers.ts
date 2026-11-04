@@ -136,6 +136,18 @@ export function useTimers({
         apply(r.state, r.logs);
       } else apply(startTimer(state, task.id, t));
     },
+    /// Stops [task]'s timer and waits until its minutes are logged; the
+    /// minutes logged, or null when no timer ran for it on this computer.
+    stop: async (task: PlannerTask): Promise<number | null> => {
+      if (state.timers[task.id]?.startedAt == null) return null;
+      const t = Date.now();
+      setNow(t);
+      const r = pauseTimers(state, [task.id], t);
+      setState(r.state);
+      save(r.state);
+      await write(r.logs);
+      return r.logs.reduce((sum, l) => sum + l.minutes, 0);
+    },
     pauseAll: () => {
       const r = pauseTimers(state, runningTimers(state), Date.now());
       apply(r.state, r.logs);

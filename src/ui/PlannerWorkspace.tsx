@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { PlannerRepo, SaveResult } from '../data/plannerRepo';
 import {
+  dailyPlanningId,
   decodeLabels,
+  durationLabel,
   filterActive,
   groupByProject,
   isClosed,
@@ -907,18 +909,30 @@ export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }
           tasks={all}
           activity={activity}
           today={today}
+          timing={timers.state.timers[dailyPlanningId(today)]?.startedAt != null}
+          logged={(time?.sessions ?? []).filter((s) => s.task_id === dailyPlanningId(today) && s.deleted_at_ms == null).reduce((sum, s) => sum + s.minutes, 0)}
           onStart={(t) =>
             guarded(async () => {
               if (settle(await planner.setStatus(t, 'doing'), t)) {
+                // As on the phone, starting it runs its timer.
+                if (timers.state.timers[t.id]?.startedAt == null) timers.toggle(t);
                 say(`Daily planning started at ${new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`);
                 load();
               }
             })
           }
-          onFinish={(t) =>
+          onFinish={(t, untimed) =>
             guarded(async () => {
-              if (settle(await planner.setStatus(t, 'done'), t)) {
-                say('Daily planning done');
+              // Stop its timer first so the minutes are logged before it is done.
+              let minutes = (await timers.stop(t)) ?? 0;
+              if (untimed) {
+                const r = await planner.logTime(t, untimed.minutes, untimed.startedAt);
+                if (r.status === 'saved') minutes += untimed.minutes;
+                else say('That time could not be saved.');
+              }
+              const fresh = (await planner.get(t.id)) ?? t;
+              if (settle(await planner.setStatus(fresh, 'done'), fresh)) {
+                say(minutes > 0 ? `Daily planning done · ${durationLabel(minutes, num)} logged` : 'Daily planning done');
                 load();
               }
             })

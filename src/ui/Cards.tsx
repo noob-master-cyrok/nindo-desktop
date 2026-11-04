@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   dailyPlanningId,
+  planningStarted,
   defaultHighlights,
   durationLabel,
   isMajor,
@@ -43,20 +44,30 @@ export function Summary({ open, doing, overdue, doneWeek }: { open: number; doin
   );
 }
 
-/// Today's Daily planning task, started and finished once, as on the phone.
+/// Today's Daily planning task, started and finished once, as on the phone:
+/// Start runs its timer, Finish stops it so the minutes are logged as Work.
+/// When no timer ran for it on this computer (started on the phone or on
+/// another computer), Finish can log the time since it started instead.
 /// Hidden on days without one.
 export function DailyPlanningCard({
   tasks,
   activity,
   today,
+  timing,
+  logged,
   onStart,
   onFinish,
 }: {
   tasks: PlannerTask[];
   activity: Activity[];
   today: string;
+  /// Its timer is running on this computer.
+  timing: boolean;
+  /// Minutes already logged on it.
+  logged: number;
   onStart: (task: PlannerTask) => void;
-  onFinish: (task: PlannerTask) => void;
+  /// [untimed]: minutes to log from when it started, when no timer ran here.
+  onFinish: (task: PlannerTask, untimed: { minutes: number; startedAt: number } | null) => void;
 }) {
   const { num } = useSettings();
   const [asking, setAsking] = useState(false);
@@ -64,11 +75,13 @@ export function DailyPlanningCard({
   if (!task || task.status === 'cancelled') return null;
   const done = task.status === 'done';
   const running = task.status === 'doing';
-  // When it went in progress, from its history.
-  const started = activity
-    .filter((a) => a.task_id === task.id && a.kind === 'status' && a.body === 'doing')
-    .reduce<number | null>((last, a) => Math.max(last ?? 0, a.created_at_ms), null);
+  const started = planningStarted(activity, task.id);
   const spent = started ? Math.max(0, Math.round(((done ? (task.completed_at_ms ?? Date.now()) : Date.now()) - started) / 60000)) : null;
+  const untimed = !timing && started ? Math.floor((Date.now() - started) / 60000) : 0;
+  const finish = (log: boolean) => {
+    setAsking(false);
+    onFinish(task, log && started && untimed > 0 ? { minutes: Math.min(untimed, 24 * 60), startedAt: started } : null);
+  };
 
   return (
     <section className={running ? 'plan-card running' : 'plan-card'} aria-label="Daily planning">
@@ -77,7 +90,7 @@ export function DailyPlanningCard({
         <strong>Daily planning</strong>
         <span className="muted small">
           {done
-            ? `Done${spent !== null ? ` · ${durationLabel(spent, num)}` : ''}`
+            ? `Done${logged > 0 ? ` · ${durationLabel(logged, num)} logged` : spent !== null ? ` · ${durationLabel(spent, num)}` : ''}`
             : running
               ? started
                 ? `Started ${clock(started, num)} · ${durationLabel(spent ?? 0, num)}`
@@ -93,21 +106,32 @@ export function DailyPlanningCard({
       {asking && (
         <Modal title="Finish daily planning?" onClose={() => setAsking(false)}>
           <div className="stack">
-            <p>Once a day. The time counts toward Work in Insights on your phone when its timer ran there.</p>
+            {timing || untimed <= 0 ? (
+              <p>Once a day. Its timer stops and the time counts toward Work in Insights.</p>
+            ) : (
+              <p>
+                No timer ran for it on this computer. If you started it on your phone, its timer there logs the time. Otherwise log the{' '}
+                {durationLabel(untimed, num)} since {clock(started!, num)}.
+              </p>
+            )}
             <div className="row end">
               <button className="secondary" onClick={() => setAsking(false)}>
                 Cancel
               </button>
-              <button
-                className="primary"
-                autoFocus
-                onClick={() => {
-                  setAsking(false);
-                  onFinish(task);
-                }}
-              >
-                Finish
-              </button>
+              {timing || untimed <= 0 ? (
+                <button className="primary" autoFocus onClick={() => finish(false)}>
+                  Finish
+                </button>
+              ) : (
+                <>
+                  <button className="secondary" onClick={() => finish(false)}>
+                    Finish only
+                  </button>
+                  <button className="primary" autoFocus onClick={() => finish(true)}>
+                    Finish and log {durationLabel(untimed, num)}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </Modal>
