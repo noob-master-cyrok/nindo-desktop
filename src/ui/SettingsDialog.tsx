@@ -134,6 +134,28 @@ export function SettingsDialog({ email, onSignOut, onClose, onExport }: { email:
           />
         </section>
 
+        <section className="set-group" aria-label="Daily planning">
+          <h3 className="kicker">Daily planning</h3>
+          <div className="row" style={{ flexWrap: 'wrap' }} role="group" aria-label="Daily planning days">
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((name, day) => {
+              const on = settings.dailyPlanningDays.includes(day);
+              return (
+                <button
+                  key={name}
+                  className={on ? 'chip on' : 'chip'}
+                  aria-pressed={on}
+                  onClick={() =>
+                    update({ dailyPlanningDays: on ? settings.dailyPlanningDays.filter((d) => d !== day) : [...settings.dailyPlanningDays, day].sort() })
+                  }
+                >
+                  {name}
+                </button>
+              );
+            })}
+          </div>
+          <p className="muted small">Days this computer makes the Daily planning task when your phone has not made it yet. Match your phone's setting.</p>
+        </section>
+
         {onExport && (
           <section className="set-group" aria-label="Calendar file">
             <h3 className="kicker">Calendar file</h3>

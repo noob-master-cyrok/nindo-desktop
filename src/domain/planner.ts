@@ -323,6 +323,20 @@ export function dailyPlanningId(today: string): string {
   return `daily-planning-${today}`;
 }
 
+/// Today's Daily planning task as the phone makes it: Urgent, starts and is
+/// due today, at the top of To do.
+export function dailyPlanningTask(today: string, now: number, tasks: PlannerTask[]) {
+  const first = Math.min(1, ...tasks.filter((t) => t.status === 'todo').map((t) => t.sort_order));
+  return newTask(dailyPlanningId(today), now, {
+    title: 'Daily planning',
+    description: 'Plan the day and get set up. Start when you begin and Finish when you are done; the time counts as Work in Insights.',
+    priority: 4,
+    start_date: today,
+    due_date: today,
+    sort_order: first - 1,
+  });
+}
+
 /// When [taskId] last went in progress, from its history.
 export function planningStarted(activity: Pick<Activity, 'task_id' | 'kind' | 'body' | 'created_at_ms'>[], taskId: string): number | null {
   return activity

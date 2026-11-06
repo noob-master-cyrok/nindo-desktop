@@ -171,7 +171,7 @@ function rememberSidebar(hidden: boolean) {
 }
 
 export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }: { email: string; planner: PlannerRepo; items: ItemsRepo; onSignOut: () => void }) {
-  const { num } = useSettings();
+  const { num, settings } = useSettings();
   const [section, setSectionState] = useState<Section>(lastSection);
   const [calView, setCalView] = useState<CalView>('month');
   const [itemSel, setItemSel] = useState<{ id: string } | { defaults: { date?: string; kind?: string } } | null>(null);
@@ -356,6 +356,25 @@ export function PlannerWorkspace({ email, planner, items: itemsRepo, onSignOut }
 
   const today = localIsoDate(new Date());
   const all = useMemo(() => tasks ?? [], [tasks]);
+  // The phone makes today's Daily planning task only while Nindo is open
+  // there, so make it here too when it is missing. Tried once a day per page,
+  // after the tasks have loaded; the fixed id keeps it to one task.
+  const planningTried = useRef<string | null>(null);
+  const planningDays = settings.dailyPlanningDays;
+  useEffect(() => {
+    if (tasks === null || planningTried.current === today) return;
+    if (!planningDays.includes(new Date().getDay())) return;
+    planningTried.current = today;
+    planner
+      .ensureDailyPlanning(today, tasks)
+      .then((row) => {
+        if (row) setTasks((list) => (list && !list.some((t) => t.id === row.id) ? [...list, row] : list));
+      })
+      .catch(() => {
+        // Offline or refused: try again on the next load.
+        planningTried.current = null;
+      });
+  }, [tasks, today, planningDays, planner]);
   const timers = useTimers({ planner, tasks: all, onLogged: load, say });
   const liveIds = runningTimers(timers.state);
   const runOf = (t: PlannerTask) => {

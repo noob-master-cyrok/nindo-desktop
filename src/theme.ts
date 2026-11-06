@@ -17,9 +17,15 @@ export interface Settings {
   name: string;
   /// Which calendar leads dates and the month grid.
   calendarFirst: 'AD' | 'BS';
+  /// Weekdays (0 = Sunday) that get a Daily planning task, as the phone's
+  /// setting. Empty = off.
+  dailyPlanningDays: number[];
 }
 
-export const defaultSettings: Settings = { mode: 'system', accent: 'raspberry', background: 'white', numerals: 'latin', name: '', calendarFirst: 'BS' };
+/// Sunday to Friday, the phone's default.
+export const defaultDailyPlanningDays = [0, 1, 2, 3, 4, 5];
+
+export const defaultSettings: Settings = { mode: 'system', accent: 'raspberry', background: 'white', numerals: 'latin', name: '', calendarFirst: 'BS', dailyPlanningDays: defaultDailyPlanningDays };
 
 type Tokens = Record<string, string>;
 
@@ -274,6 +280,9 @@ export function loadSettings(): Settings {
       numerals: v.numerals === 'devanagari' ? 'devanagari' : 'latin',
       name: typeof v.name === 'string' ? v.name.slice(0, 40) : '',
       calendarFirst: v.calendarFirst === 'AD' ? 'AD' : 'BS',
+      dailyPlanningDays: Array.isArray(v.dailyPlanningDays)
+        ? [...new Set(v.dailyPlanningDays.filter((d): d is number => Number.isInteger(d) && d >= 0 && d <= 6))].sort()
+        : defaultDailyPlanningDays,
     };
   } catch {
     return defaultSettings;

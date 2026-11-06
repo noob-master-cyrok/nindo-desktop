@@ -45,6 +45,35 @@ describe('PlannerRepo', () => {
     repo = new PlannerRepo({ store, now: () => clock, uuid: () => `id-${++n}` });
   });
 
+  describe('ensureDailyPlanning', () => {
+    const today = '2026-11-06';
+    const id = 'daily-planning-2026-11-06';
+
+    it('makes today\'s task when the phone has not, Urgent at the top of To do', async () => {
+      const other = store.seed('planner_tasks', phoneTask({ sort_order: 3 })) as unknown as PlannerTask;
+      const row = await repo.ensureDailyPlanning(today, [other]);
+      expect(row).toMatchObject({ id, title: 'Daily planning', status: 'todo', priority: 4, start_date: today, due_date: today, sort_order: 0 });
+      expect(store.tables.planner_tasks.size).toBe(2);
+      expect(history()).toEqual(['created:']);
+    });
+
+    it('makes nothing when it is already loaded, or when the phone made it meanwhile', async () => {
+      const phone = store.seed('planner_tasks', { ...newTask(id, 1_000, { title: 'दैनिक योजना', status: 'doing' }) }) as unknown as PlannerTask;
+      expect(await repo.ensureDailyPlanning(today, [phone])).toBe(phone);
+      // Not loaded yet here, but already on the server: read back, not doubled.
+      const back = await repo.ensureDailyPlanning(today, []);
+      expect(back).toMatchObject({ id, title: 'दैनिक योजना', status: 'doing' });
+      expect(store.tables.planner_tasks.size).toBe(1);
+      expect(history()).toEqual([]);
+    });
+
+    it('leaves a deleted one deleted', async () => {
+      store.seed('planner_tasks', { ...newTask(id, 1_000, { title: 'Daily planning' }), deleted_at_ms: 2_000 });
+      expect(await repo.ensureDailyPlanning(today, [])).toBeNull();
+      expect((store.tables.planner_tasks.get(id) as unknown as PlannerTask).deleted_at_ms).toBe(2_000);
+    });
+  });
+
   it('updates only edited fields, keeps the rest, and logs history', async () => {
     const seen = store.seed('planner_tasks', phoneTask()) as unknown as PlannerTask;
     const result = await repo.update(seen, { title: 'Ship it', priority: 4 });

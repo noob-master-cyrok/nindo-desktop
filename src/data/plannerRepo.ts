@@ -1,4 +1,6 @@
 import {
+  dailyPlanningId,
+  dailyPlanningTask,
   decodeLabels,
   encodeLabels,
   isClosed,
@@ -143,6 +145,24 @@ export class PlannerRepo {
     const result = await this.insert<PlannerTask>('planner_tasks', row);
     if (result.status === 'saved' && !row.parent_id) await this.log(row.id, 'created', '');
     return result;
+  }
+
+  /// Makes today's Daily planning task unless the server already has one,
+  /// deleted or not (the id is fixed per day, so the phone and every
+  /// computer share one task and a deleted one stays deleted). [tasks] are
+  /// the tasks loaded now. Returns the task, or null when it is deleted.
+  async ensureDailyPlanning(today: string, tasks: PlannerTask[]): Promise<PlannerTask | null> {
+    const id = dailyPlanningId(today);
+    const have = tasks.find((t) => t.id === id);
+    if (have) return have;
+    const row = dailyPlanningTask(today, this.now(), tasks);
+    const result = await this.store.insert('planner_tasks', row);
+    if (result.kind === 'duplicate') {
+      const existing = (await this.store.fetchById('planner_tasks', id)) as PlannerTask | null;
+      return existing && existing.deleted_at_ms == null ? existing : null;
+    }
+    await this.log(id, 'created', '');
+    return result.row as unknown as PlannerTask;
   }
 
   /// Saves [changes] made to the version of the task the person saw.
